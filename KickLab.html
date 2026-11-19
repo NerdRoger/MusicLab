@@ -1,0 +1,1370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Kick Lab</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #f2ede7;
+      background: #141414;
+      --panel: #1c1c1d;
+      --edge: #363333;
+      --muted: #b1a8a2;
+      --accent: #ff8058;
+      --mono: "Cascadia Mono", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, select, input { font: inherit; }
+    button, select {
+      color: inherit; background: #262425; border: 1px solid var(--edge);
+      border-radius: 8px; min-height: 42px; cursor: pointer;
+    }
+    button:hover, select:hover { border-color: #8e746a; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    main { max-width: 1180px; margin: auto; padding: 36px 30px 30px; }
+    header { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 23px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(2.7rem, 6vw, 4.2rem); letter-spacing: -.075em; line-height: .98; }
+    h1 span { color: var(--accent); }
+    .status { color: var(--muted); font: .82rem var(--mono); text-align: right; }
+    .editor-workspace {
+      display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+      align-items: start; gap: 14px; margin-top: 18px;
+    }
+    .stack-head { flex-wrap: wrap; margin-bottom: 10px; }
+    .stack-head button, .model-picker-head button { padding: 0 10px; }
+    .layer-list { display: grid; gap: 6px; }
+    .layer-entry {
+      display: grid; grid-template-columns: 34px minmax(0, 1fr) auto minmax(90px, 1fr) 34px;
+      align-items: center; gap: 7px; padding: 6px;
+      border: 1px solid var(--edge); border-radius: 8px;
+    }
+    .layer-entry.is-selected { background: #35251f; border-color: var(--accent); }
+    .stack-empty { color: var(--muted); margin-top: 5px; }
+    .layer-select {
+      min-height: 34px; padding: 4px; text-align: left; font-size: .87rem;
+      min-width: 0; font-weight: 650; border: 0; background: transparent;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .layer-select:hover, .layer-select[aria-pressed="true"] { color: #ffac92; }
+    .layer-select:focus-visible { outline: none; }
+    .layer-entry.is-selected,
+    .layer-entry:has(> .layer-select:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .layer-actions { display: flex; gap: 4px; }
+    .layer-actions button, .remove-layer, .layer-randomize {
+      display: inline-grid; place-items: center; width: 34px; height: 34px; min-height: 34px; padding: 0;
+    }
+    .remove-layer { font-size: 1.2rem; color: var(--muted); }
+    .dice-icon {
+      --pip: currentColor 1px, transparent 1.2px;
+      --corner-pips: radial-gradient(circle at 26% 26%, var(--pip)),
+        radial-gradient(circle at 74% 26%, var(--pip)),
+        radial-gradient(circle at 26% 74%, var(--pip)),
+        radial-gradient(circle at 74% 74%, var(--pip));
+      position: relative; width: 25px; height: 24px; background-color: inherit;
+    }
+    .dice-icon::before, .dice-icon::after {
+      content: ""; position: absolute; box-sizing: border-box;
+      width: 16px; height: 16px; border: 1.4px solid currentColor; border-radius: 3px;
+      background-color: inherit; background-image: var(--corner-pips);
+    }
+    .dice-icon::before { top: 2px; right: 2px; transform: rotate(19deg); }
+    .dice-icon::after {
+      bottom: 1px; left: 1px; transform: rotate(-19deg);
+      background-image: radial-gradient(circle at center, var(--pip)), var(--corner-pips);
+    }
+    .mix-control { display: grid; grid-template-columns: auto minmax(0, 1fr) 4ch; align-items: center; gap: 5px; min-width: 0; }
+    .mix-control label { font-size: .8rem; }
+    .mix-control output { text-align: right; }
+    .solo-layer, .mute-layer { font: 800 1rem Arial, sans-serif; }
+    .solo-layer[aria-pressed="true"] { color: #152218; background: #a5d7ad; border-color: #a5d7ad; }
+    .mute-layer[aria-pressed="true"] { color: #21120e; background: var(--accent); border-color: var(--accent); }
+    .layer-entry.is-muted .mix-control > .slider { opacity: .55; }
+    .parameter-description { color: var(--muted); font-size: .88rem; margin-top: 6px; }
+    .audition-body { display: grid; grid-template-columns: minmax(0, 2.15fr) minmax(255px, 1fr); gap: 20px; margin-top: 14px; }
+    .audition-body h3 { font-size: .95rem; }
+    .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; min-width: 0; padding: 19px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    h2 { font-size: 1.14rem; letter-spacing: -.015em; }
+    label, .muted { color: var(--muted); }
+    .scope { margin-top: 13px; }
+    canvas { display: block; width: 100%; height: 161px; background: #151414; border: 1px solid #383131; border-radius: 7px; }
+    .scope-axis { display: flex; justify-content: space-between; color: var(--muted); margin-top: 5px; font: .79rem var(--mono); }
+    .metrics, output { color: #ffad95; font: .82rem var(--mono); white-space: nowrap; }
+    .transport { display: grid; align-content: start; gap: 12px; }
+    .trigger { background: var(--accent); color: #21120e; border-color: var(--accent); font-weight: 750; }
+    .trigger:hover { background: #ff9a79; }
+    .loop-on { border-color: var(--accent); color: #ffad95; }
+    .transport label { font-size: .88rem; }
+    .slider { width: 100%; min-width: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .audition-head button { padding: 0 8px; font-size: .85rem; min-height: 34px; }
+    .dialog-card { width: min(420px, calc(100% - 32px)); color: inherit; }
+    .dialog-card::backdrop { background: rgb(0 0 0 / 65%); }
+    .model-picker { width: min(900px, calc(100% - 32px)); max-height: calc(100% - 32px); }
+    .model-picker-head { margin-bottom: 12px; }
+    .model-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .model-choice {
+      display: grid; align-content: start; gap: 6px; min-width: 0;
+      padding: 12px; text-align: left; background: #242222;
+    }
+    .model-choice:hover { border-color: var(--accent); background: #35251f; }
+    .model-choice strong { font-size: .95rem; }
+    .model-choice span { color: var(--muted); font-size: .875rem; line-height: 1.35; }
+    .dialog-form { display: grid; gap: 12px; }
+    .export-name { width: 100%; color: inherit; background: #151414; border: 1px solid var(--edge); border-radius: 7px; padding: 9px 10px; }
+    .dialog-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
+    .dialog-actions button { padding: 0 12px; }
+    select {
+      appearance: none; padding-right: 27px !important;
+      background-image: linear-gradient(45deg, transparent 50%, #c6b9b3 50%), linear-gradient(135deg, #c6b9b3 50%, transparent 50%);
+      background-position: right 13px center, right 9px center;
+      background-size: 4px 4px; background-repeat: no-repeat;
+    }
+    .form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; margin-top: 9px; }
+    .parameter { min-width: 0; border-top: 1px solid var(--edge); padding: 7px 0 6px; display: grid; grid-template-rows: 1fr auto; gap: 4px; }
+    .parameter .row { flex-wrap: wrap; align-items: baseline; align-content: start; gap: 3px 5px; }
+    .parameter label { color: #e5dcd6; font-size: .85rem; line-height: 1.2; overflow-wrap: anywhere; }
+    .parameter output { font-size: .75rem; }
+    .parameter select { min-height: 27px; min-width: 0; width: 100%; padding: 2px 6px; font-size: .82rem; }
+    .footer { display: flex; justify-content: space-between; gap: 10px; margin-top: 13px; font-size: .81rem; color: var(--muted); flex-wrap: wrap; }
+    @media (max-width: 1050px) {
+      .layer-entry { grid-template-columns: 34px minmax(0, 1fr) auto 34px; }
+      .layer-actions { grid-column: 3 / -1; justify-self: end; }
+      .layer-entry .mix-control { grid-column: 2 / 4; grid-row: 2; }
+      .layer-randomize { grid-column: 4; grid-row: 2; }
+    }
+    @media (max-width: 780px) {
+      .editor-workspace { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 740px) {
+      main { padding: 24px 16px; }
+      .audition-body { grid-template-columns: 1fr; }
+      .card { padding: 15px; }
+      .model-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 460px) {
+      .model-choices { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Kick<span> Lab</span></h1>
+      <p class="status" id="status" role="status">Audio ready on trigger</p>
+    </header>
+    <section class="card" aria-labelledby="transport-title">
+      <div class="row audition-head">
+        <h2 id="transport-title">Audition</h2>
+        <button type="button" id="export">Export WAV</button>
+      </div>
+      <div class="audition-body">
+        <div>
+          <div class="row"><h3>Mix waveform</h3><span class="metrics" id="metrics"></span></div>
+          <div class="scope">
+            <canvas id="scope" role="img" aria-label="Synthesized kick waveform"></canvas>
+            <div class="scope-axis" aria-hidden="true"><span>0 ms</span><span id="scope-mid"></span><span id="scope-end"></span></div>
+          </div>
+        </div>
+        <div class="transport">
+          <button type="button" class="trigger" id="trigger">Trigger kick</button>
+          <button type="button" id="loop" aria-pressed="false">Start loop</button>
+          <div class="row"><label for="tempo">Tempo</label><output id="tempo-value" for="tempo">120 BPM</output></div>
+          <input class="slider" type="range" id="tempo" min="40" max="220" value="120">
+          <div class="row"><label for="output-gain">Output gain</label><output id="output-gain-value" for="output-gain">-7 dB</output></div>
+          <input class="slider" type="range" id="output-gain" min="-30" max="0" step="0.1" value="-7">
+        </div>
+      </div>
+    </section>
+    <div class="editor-workspace">
+      <section class="card stack" aria-labelledby="stack-title">
+        <div class="row stack-head">
+          <h2 id="stack-title">Layers</h2>
+          <button type="button" id="add-layer" aria-haspopup="dialog">Add layer</button>
+        </div>
+        <p class="stack-empty" id="stack-empty" hidden>Add a layer to get started.</p>
+        <div class="layer-list" id="layers"></div>
+      </section>
+      <section class="card parameter-pane" aria-labelledby="parameter-title">
+        <h2 id="parameter-title">Parameters</h2>
+        <p class="parameter-description" id="parameter-description"></p>
+        <div class="form" id="parameters"></div>
+      </section>
+    </div>
+    <div class="footer"><span id="storage-note">Your layers are saved in this browser.</span><span>Mono · 48 kHz · Decay measured to −40 dB</span></div>
+  </main>
+  <dialog class="card dialog-card model-picker" id="model-dialog" aria-labelledby="model-dialog-title">
+    <div class="row model-picker-head">
+      <h2 id="model-dialog-title">Add layer</h2>
+      <button type="button" id="model-cancel" autofocus>Cancel</button>
+    </div>
+    <div class="model-choices" id="model-choices"></div>
+  </dialog>
+  <dialog class="card dialog-card" id="export-dialog" aria-labelledby="export-title">
+    <form class="dialog-form" id="export-form">
+      <h2 id="export-title">Export WAV</h2>
+      <label for="export-name">File name</label>
+      <input class="export-name" id="export-name" type="text" required maxlength="120" spellcheck="false" autofocus>
+      <div class="dialog-actions">
+        <button type="button" id="export-cancel">Cancel</button>
+        <button type="submit" class="trigger">Download WAV</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="card dialog-card" id="remove-dialog" aria-labelledby="remove-title" aria-describedby="remove-description">
+    <form class="dialog-form" method="dialog">
+      <h2 id="remove-title">Remove layer?</h2>
+      <p class="muted" id="remove-description"></p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" autofocus>Cancel</button>
+        <button type="submit" value="remove" class="trigger">Remove layer</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    // Synthesis produces the same samples for the scope, playback, and export.
+    const rate = 48000;
+    const turn = 2 * Math.PI;
+    const decay = (seconds, ms) => Math.exp(-Math.LN10 * 2 * seconds / (ms * 0.001));
+    const gain = db => 10 ** (db / 20);
+    const sweep = (t, p) => p.tune * 2 ** (p.sweep / 12 * decay(t, p.sweepTime));
+    const attack = t => Math.min(1, t / 0.0007);
+
+    function sweptSine(p) {
+      let phase = 0;
+      const beater = noiseBand(900, p.clickTone);
+      const curvature = 2 ** (p.sweepCurve / 50);
+      const duration = p.sweepTime / 1000;
+      return t => {
+        const body = Math.sin(phase) * attack(t) * decay(t, p.decay);
+        const sweepPosition = p.sweepCurve === 0 ? t : duration * (t / duration) ** curvature;
+        phase += turn * sweep(sweepPosition, p) / rate;
+        const click = beater() * attack(t) * decay(t, p.clickDecay) * p.click / 100;
+        return body + click;
+      };
+    }
+
+    function resonator(p) {
+      // A finite bipolar pulse excites a damped pair of quadrature states.
+      let real = 0;
+      let imaginary = 0;
+      let filtered = 0;
+      const damping = decay(1 / rate, p.decay);
+      const tone = 1 - Math.exp(-turn * p.tone / rate);
+      const pulseWidth = p.exciterWidth / 1000;
+      const pulseGain = p.impact / 100 * Math.min(1, Math.sqrt(0.0005 / pulseWidth));
+      return t => {
+        const frequency = sweep(t, p) * 2 ** (p.drift / 12 * decay(t, 90));
+        const angle = turn * frequency / rate;
+        const pulse = t < pulseWidth ? Math.sin(turn * t / pulseWidth) * pulseGain : 0;
+        const previous = real;
+        real = damping * (real * Math.cos(angle) - imaginary * Math.sin(angle));
+        imaginary = damping * (imaginary * Math.cos(angle) + previous * Math.sin(angle) + pulse);
+        filtered += tone * (real * 1.5 + pulse * 0.32 - filtered);
+        return filtered;
+      };
+    }
+
+    function fmKick(p) {
+      let carrier = 0;
+      let modulator = 0;
+      return t => {
+        const index = p.fm * decay(t, p.fmDecay);
+        const sample = Math.sin(carrier + index * Math.sin(modulator));
+        carrier += turn * sweep(t, p) / rate;
+        const modSweep = 2 ** (p.modSweep / 12 * decay(t, p.fmDecay));
+        modulator += turn * p.tune * p.ratio * modSweep / rate;
+        return sample * attack(t) * decay(t, p.decay);
+      };
+    }
+
+    function modalKick(p) {
+      const modes = [
+        { ratio: 1, level: 0.86, length: 1, edgeWeight: -0.55 },
+        { ratio: 1.59, level: 0.57, length: 0.66, edgeWeight: 0.7 },
+        { ratio: 2.14, level: 0.37, length: 0.45, edgeWeight: -0.4 },
+        { ratio: 2.92, level: 0.21, length: 0.25, edgeWeight: 0.9 },
+        { ratio: 3.60, level: 0.12, length: 0.17, edgeWeight: 0.8 },
+      ];
+      const position = (p.strikePosition - 50) / 50;
+      const partials = modes.map((mode, index) => {
+        const length = index === 0 ? p.decay : p.decay * mode.length / (0.5 + p.damping / 55);
+        const level = index === 0 ? mode.level : mode.level * p.resonance / 100;
+        return { angle: turn * mode.ratio * p.tune, length, level: level * (1 + position * mode.edgeWeight) };
+      });
+      const beater = noiseBand(650, 1200 + p.hardness * 72);
+      const beaterTime = 13 - p.hardness * 0.1;
+      return t => {
+        let sample = 0;
+        for (const mode of partials) {
+          sample += Math.sin(mode.angle * t) * decay(t, mode.length) * mode.level;
+        }
+        return attack(t) * (sample + beater() * decay(t, beaterTime) * p.beater / 70);
+      };
+    }
+
+    function hardSyncKick(p) {
+      const oversample = 4;
+      const lowPass = 1 - Math.exp(-turn * 12000 / (rate * oversample));
+      const dcTracking = 1 - Math.exp(-turn * 12 / rate);
+      let leader = 0;
+      let follower = 0;
+      let low1 = 0;
+      let low2 = 0;
+      let dc = 0;
+      return t => {
+        const step = sweep(t, p) / (rate * oversample);
+        const ratio = p.tailRatio + p.syncBend * decay(t, p.syncDecay);
+        for (let i = 0; i < oversample; i++) {
+          const sample = Math.sin(turn * follower);
+          low1 += lowPass * (sample - low1);
+          low2 += lowPass * (low1 - low2);
+          leader += step;
+          if (leader >= 1) {
+            // Retain the fractional time elapsed since the leader wrapped.
+            leader -= 1;
+            follower = leader * ratio;
+          } else {
+            follower += step * ratio;
+          }
+        }
+        dc += dcTracking * (low2 - dc);
+        return (low2 - dc) * attack(t) * decay(t, p.decay);
+      };
+    }
+
+    function noiseSweepKick(p) {
+      const noise = whiteNoise();
+      let bandState = 0;
+      let lowState = 0;
+      return t => {
+        const frequency = sweep(t, p);
+        const focus = Math.min(32, Math.max(0.25, p.focus * 2 ** (p.qSweep * decay(t, p.sweepTime))));
+        const damping = 1 / focus;
+        // Trapezoidal state-variable filter with a moving center frequency.
+        const g = Math.tan(Math.PI * frequency / rate);
+        const band = (bandState + g * (noise() - lowState)) / (1 + g * (g + damping));
+        const low = lowState + g * band;
+        bandState = 2 * band - bandState;
+        lowState = 2 * low - lowState;
+        const compensation = Math.min(12, 0.55 * Math.sqrt(rate / (frequency * focus)));
+        const texture = p.grain / 100;
+        return attack(t) * decay(t, p.decay) * band * compensation *
+          (1 + texture * 0.85 * Math.sin(turn * 73 * t));
+      };
+    }
+
+    function delayKick(p) {
+      const period = rate / p.tune;
+      const pole = Math.exp(-turn * p.dampTone / rate);
+      const radians = turn / period;
+      const real = 1 - pole * Math.cos(radians);
+      const imaginary = pole * Math.sin(radians);
+      const filterDelay = Math.atan2(imaginary, real) / radians;
+      const allpass = 1 - 1.92 * p.delayDispersion / 100;
+      const sin = Math.sin(radians);
+      const cos = Math.cos(radians);
+      const dispersionDelay = (Math.atan2(sin, allpass + cos) -
+        Math.atan2(allpass * sin, 1 + allpass * cos)) / radians;
+      const delay = period - filterDelay - dispersionDelay;
+      const loopMagnitude = (1 - pole) / Math.hypot(real, imaginary);
+      const feedback = Math.min(0.9999, decay(1 / p.tune, p.decay) / loopMagnitude);
+      const buffer = new Float32Array(Math.ceil(period) + 1);
+      const excitation = noiseBand(80, p.strikeTone);
+      const strikeTime = p.strikeWidth / 1000;
+      const dcTracking = 1 - Math.exp(-turn * 14 / rate);
+      let write = 0;
+      let filtered = 0;
+      let previousInput = 0;
+      let previousOutput = 0;
+      let dc = 0;
+      return t => {
+        const read = (write + buffer.length - delay) % buffer.length;
+        const index = Math.floor(read);
+        const first = buffer[index];
+        const delayed = first + (buffer[(index + 1) % buffer.length] - first) * (read - index);
+        filtered += (1 - pole) * (delayed - filtered);
+        let loop = filtered;
+        if (p.delayDispersion > 0) {
+          loop = allpass * filtered + previousInput - allpass * previousOutput;
+          previousInput = filtered;
+          previousOutput = loop;
+        }
+        const strike = t < strikeTime ? excitation() * Math.sin(Math.PI * t / strikeTime) : 0;
+        const sample = loop * feedback + strike * 0.85;
+        buffer[write] = sample;
+        write = (write + 1) % buffer.length;
+        dc += dcTracking * (sample - dc);
+        return sample - dc;
+      };
+    }
+
+    function ringKick(p) {
+      let phase = 0;
+      let clangOffset = 0;
+      return t => {
+        // Multiplying these two tones leaves a difference at the swept pitch.
+        const doubledProduct = 2 * Math.sin(phase * p.ringRatio) * Math.sin(phase * (p.ringRatio + 1));
+        const difference = Math.cos(phase);
+        const envelope = decay(t, p.ringDecay);
+        const mix = p.ringMix / 100 * envelope;
+        const step = turn * sweep(t, p) / rate;
+        let clang = doubledProduct - difference;
+        if (p.clangSweep !== 0) {
+          const sumRatio = 2 * p.ringRatio + 1;
+          clang = -Math.cos(phase * sumRatio + clangOffset);
+          clangOffset += step * sumRatio * (2 ** (p.clangSweep / 12 * envelope) - 1);
+        }
+        phase += step;
+        return (difference + clang * mix) * attack(t) * decay(t, p.decay);
+      };
+    }
+
+    function foldKick(p) {
+      const oversample = 4;
+      const coefficient = 1 - Math.exp(-turn * 14000 / (oversample * rate));
+      const dcTracking = 1 - Math.exp(-turn * 16 / rate);
+      let phase = 0;
+      let filtered = 0;
+      let dc = 0;
+      return t => {
+        const step = turn * sweep(t, p) / (oversample * rate);
+        const amount = 1 + p.folds * decay(t, p.foldDecay);
+        const offset = p.foldOffset / 100 * (1 - 1 / amount);
+        const clean = Math.sin(phase + step * (oversample - 1));
+        for (let i = 0; i < oversample; i++) {
+          const driven = (Math.sin(phase) + offset) * amount;
+          const wrapped = ((driven + 1) % 4 + 4) % 4;
+          const folded = 1 - Math.abs(wrapped - 2);
+          filtered += coefficient * (folded - filtered);
+          phase += step;
+        }
+        dc += dcTracking * (filtered - dc);
+        const wet = filtered - dc;
+        return (wet + (clean - wet) * p.cleanSub / 100) * attack(t) * decay(t, p.decay);
+      };
+    }
+
+    function grainKick(p) {
+      const random = whiteNoise();
+      const grains = [];
+      const density = p.density;
+      const length = p.grainSize / 1000;
+      const normalization = 1 / Math.sqrt(Math.max(1, density * length * 0.5));
+      let next = 0;
+      return t => {
+        if (t >= next) {
+          const spread = random() * p.spray / 12;
+          const frequency = sweep(t, p) * 2 ** spread;
+          const phase = turn * random() * p.spray / 48;
+          grains.push({ start: t, frequency, phase });
+          const rateScale = 2 ** (p.densityEnvelope * decay(t, p.sweepTime));
+          const grainRate = Math.min(350, Math.max(6, density * rateScale));
+          next += (1 + 0.4 * random() * p.jitter / 100) / grainRate;
+        }
+        while (grains.length && t - grains[0].start >= length) grains.shift();
+        let sample = 0;
+        for (const grain of grains) {
+          const age = t - grain.start;
+          const window = 0.5 - 0.5 * Math.cos(turn * age / length);
+          sample += window * Math.sin(turn * grain.frequency * age + grain.phase);
+        }
+        return sample * normalization * decay(t, p.decay);
+      };
+    }
+
+    const logicOperations = [
+      { name: "XOR", combine: (a, b) => a ^ b },
+      { name: "AND", combine: (a, b) => a & b },
+      { name: "OR", combine: (a, b) => a | b },
+      { name: "Wrap Add", combine: (a, b) => a + b },
+    ];
+
+    function logicKick(p) {
+      const mask = (1 << p.bits) - 1;
+      const combine = logicOperations[p.logicOperation]?.combine ?? logicOperations[0].combine;
+      const clockStep = p.clock / rate;
+      const coefficient = 1 - Math.exp(-turn * p.logicTone / rate);
+      const dcTracking = 1 - Math.exp(-turn * 18 / rate);
+      let clock = 1;
+      let firstPhase = 0;
+      let secondPhase = 0.31;
+      let held = 0;
+      let filtered = 0;
+      let dc = 0;
+      return t => {
+        if (clock >= 1) {
+          clock -= 1;
+          const a = Math.floor(firstPhase * (mask + 1));
+          const b = Math.floor(secondPhase * (mask + 1));
+          held = 2 * (combine(a, b) & mask) / mask - 1;
+          const step = sweep(t, p) / p.clock;
+          firstPhase = (firstPhase + step) % 1;
+          secondPhase = (secondPhase + step * p.logicRatio) % 1;
+        }
+        clock += clockStep;
+        filtered += coefficient * (held - filtered);
+        dc += dcTracking * (filtered - dc);
+        return (filtered - dc) * attack(t) * decay(t, p.decay);
+      };
+    }
+
+    function inverseTransform(real, imaginary) {
+      const size = real.length;
+      let reversed = 0;
+      for (let i = 1; i < size; i++) {
+        let bit = size >> 1;
+        while (reversed & bit) {
+          reversed ^= bit;
+          bit >>= 1;
+        }
+        reversed ^= bit;
+        if (i < reversed) {
+          [real[i], real[reversed]] = [real[reversed], real[i]];
+          [imaginary[i], imaginary[reversed]] = [imaginary[reversed], imaginary[i]];
+        }
+      }
+      for (let width = 2; width <= size; width *= 2) {
+        const half = width / 2;
+        for (let offset = 0; offset < half; offset++) {
+          const cosine = Math.cos(turn * offset / width);
+          const sine = Math.sin(turn * offset / width);
+          for (let first = offset; first < size; first += width) {
+            const second = first + half;
+            const a = real[second] * cosine - imaginary[second] * sine;
+            const b = real[second] * sine + imaginary[second] * cosine;
+            real[second] = real[first] - a;
+            imaginary[second] = imaginary[first] - b;
+            real[first] += a;
+            imaginary[first] += b;
+          }
+        }
+      }
+    }
+
+    function spectralKick(p, sampleCount) {
+      // Leave space in the transform for energy before the attack to wrap around.
+      const size = 2 ** Math.ceil(Math.log2(sampleCount * 2));
+      const real = new Float64Array(size);
+      const imaginary = new Float64Array(size);
+      const bassWidth = Math.sqrt(4 * Math.LN10) / (turn * p.decay / 1000);
+      const snapWidth = p.snapCenter * p.snapBandwidth / 100;
+      const scale = rate / (2 * Math.sqrt(turn));
+      const maximum = Math.max(p.snapCenter + 7 * snapWidth, p.tune + 7 * bassWidth);
+      const lastBin = Math.min(size / 2 - 1, Math.ceil(maximum * size / rate));
+      for (let bin = 1; bin <= lastBin; bin++) {
+        const hz = bin * rate / size;
+        const bassPosition = (hz - p.tune) / bassWidth;
+        const snapPosition = (hz - p.snapCenter) / snapWidth;
+        const bass = 0.9 * Math.exp(-0.5 * bassPosition ** 2) / bassWidth;
+        const snap = 0.7 * p.snapMix / 100 * Math.exp(-0.5 * snapPosition ** 2) / snapWidth;
+        const phase = -turn * hz * 0.008 - Math.PI * p.dispersion / 1000 * snapWidth * snapPosition ** 2;
+        real[bin] = real[size - bin] = scale * snap * Math.cos(phase);
+        imaginary[bin] = scale * (snap * Math.sin(phase) - bass);
+        imaginary[size - bin] = -imaginary[bin];
+      }
+      inverseTransform(real, imaginary);
+      return (t, index) => attack(t) * real[index] / size;
+    }
+
+    function whiteNoise() {
+      // A fixed seed keeps repeat hits useful for A/B comparisons.
+      let seed = 0x56d62e11;
+      return () => {
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        return (seed >>> 0) / 2147483648 - 1;
+      };
+    }
+
+    function noiseBand(low, high) {
+      const nextNoise = whiteNoise();
+      let lowState = 0;
+      let highState = 0;
+      const lowCoefficient = 1 - Math.exp(-turn * low / rate);
+      const highCoefficient = 1 - Math.exp(-turn * high / rate);
+      return () => {
+        const noise = nextNoise();
+        lowState += lowCoefficient * (noise - lowState);
+        highState += highCoefficient * (noise - highState);
+        return (highState - lowState) * 2;
+      };
+    }
+
+    const control = (key, label, min, max, step, unit, initial, tip) =>
+      ({ key, label, min, max, step, unit, initial, tip });
+    const operation = {
+      ...control("logicOperation", "Logic operation", 0, logicOperations.length - 1, 1, "", 0,
+        "Choose how the two ramp words are combined before filtering."),
+      options: logicOperations.map(({ name }) => name),
+    };
+    const tune = value => control("tune", "Tail tune", 25, 120, 0.1, " Hz", value, "Fundamental once the hit settles.");
+    const body = value => control("decay", "Body decay", 45, 2000, 1, " ms", value, "Time for the body to fall by 40 dB.");
+    const depth = value => control("sweep", "Sweep depth", 0, 60, 1, " st", value, "Pitch offset at the start of the hit.");
+    const speed = value => control("sweepTime", "Sweep time", 1, 200, 1, " ms", value, "Time for the pitch offset to fall to 1%.");
+    const drive = value => control("drive", "Drive", 0, 24, 0.1, " dB", value, "Soft saturation amount. Zero bypasses it.");
+
+    const engines = {
+      sweep: {
+        name: "Pitch Sweep", short: "Sine + filtered click", render: sweptSine,
+        description: "A falling sine pitch with a separately shaped click.",
+        controls: [tune(50), body(460), depth(24), speed(24),
+          control("sweepCurve", "Sweep curve", -100, 100, 1, "%", 0, "Negative drops pitch sooner. Positive holds the starting pitch longer before dropping."),
+          control("click", "Click level", 0, 100, 1, "%", 24, "Amount of filtered noise at the onset."),
+          control("clickTone", "Click tone", 1100, 10000, 10, " Hz", 5500, "Upper cutoff of the beater noise."),
+          control("clickDecay", "Click decay", 1, 45, 0.1, " ms", 6, "Time for the click envelope to fall by 40 dB."),
+          drive(2)],
+      },
+      resonator: {
+        name: "Resonator", short: "Pulse-excited body", render: resonator,
+        description: "A shaped pulse excites a damped resonator with a fast pitch jump and a slower drift.",
+        controls: [tune(53), body(820), depth(13), speed(12),
+          control("drift", "Tail pitch drift", 0, 6, 0.1, " st", 1.5, "Additional, slower downward pitch movement."),
+          control("impact", "Excitation", 0, 100, 1, "%", 65, "Strength of the pulse that sets the resonator ringing."),
+          control("exciterWidth", "Exciter width", 0.2, 3, 0.05, " ms", 0.5, "Duration of the bipolar strike pulse that starts the ringing."),
+          control("tone", "Tone cutoff", 180, 8000, 10, " Hz", 2000, "Low-pass cutoff after the resonator."),
+          drive(1)],
+      },
+      fm: {
+        name: "Two-Operator FM", short: "Modulated attack", render: fmKick,
+        description: "A short phase-modulation envelope adds a tonal or metallic attack to the swept carrier.",
+        controls: [tune(49), body(420), depth(24), speed(22),
+          control("fm", "FM amount", 0, 9, 0.05, " rad", 3.2, "Initial phase-modulation index."),
+          control("ratio", "Modulator ratio", 0.5, 16, 0.05, "×", 3.45, "Modulator frequency relative to tail tune."),
+          control("fmDecay", "FM decay", 2, 400, 1, " ms", 78, "Time for the modulation index to fall by 40 dB."),
+          control("modSweep", "Modulator sweep", -24, 36, 1, " st", 0, "Initial modulator pitch offset, returning to its set ratio over FM decay."),
+          drive(3)],
+      },
+      modal: {
+        name: "Modal Drum", short: "Drumhead + beater", render: modalKick,
+        description: "Five damped drumhead modes with a filtered noise burst for the beater.",
+        controls: [tune(57), body(350),
+          control("resonance", "Upper modes", 0, 100, 1, "%", 62, "Level of the four upper resonances."),
+          control("damping", "Damping", 0, 100, 1, "%", 44, "How quickly the upper modes die away."),
+          control("strikePosition", "Strike position", 0, 100, 1, "%", 50, "Move the strike from the center toward the edge to change which modes ring."),
+          control("beater", "Beater level", 0, 100, 1, "%", 60, "Level of the short noise burst."),
+          control("hardness", "Beater hardness", 0, 100, 1, "%", 45, "Higher values make the beater brighter and shorter."),
+          drive(1)],
+      },
+      sync: {
+        name: "Hard Sync", short: "Reset oscillator", render: hardSyncKick,
+        description: "A pitched oscillator resets a second oscillator each cycle, creating a buzz that fades into the tail.",
+        controls: [tune(51), body(410), depth(21), speed(34),
+          control("syncBend", "Sync bend", 0, 12, 0.1, "×", 5.5, "Extra follower frequency as a multiple of the leader at the onset."),
+          control("syncDecay", "Sync decay", 5, 500, 1, " ms", 110, "Time for the follower ratio to settle 99% of the way toward Tail ratio."),
+          control("tailRatio", "Tail ratio", 1, 6, 0.05, "×", 1, "Follower-to-leader ratio after the sync bend settles."),
+          drive(5)],
+      },
+      noise: {
+        name: "Noise Sweep", short: "Filtered noise body", render: noiseSweepKick,
+        description: "A sweeping band-pass filter shapes noise into a low thud.",
+        controls: [
+          control("tune", "Tail center", 25, 120, 0.1, " Hz", 58, "Center frequency of the noise band once the hit settles."),
+          body(260), depth(41), speed(27),
+          control("focus", "Filter Q", 0.5, 12, 0.1, "", 4.1, "Higher values narrow the band and bring out a pitched ring."),
+          control("qSweep", "Q sweep", -3, 3, 0.1, " oct", 0, "Starting Q offset. Negative starts wider, positive starts narrower. It settles over Sweep time."),
+          control("grain", "Grain", 0, 100, 1, "%", 12, "Depth of fast amplitude modulation on the filtered noise."),
+          drive(4)],
+      },
+      delay: {
+        name: "Delay Drum", short: "Feedback comb", render: delayKick,
+        description: "A short strike recirculates through a tuned delay, building a hollow body with a bright initial attack.",
+        controls: [tune(64), body(520),
+          control("dampTone", "Loop cutoff", 250, 8500, 10, " Hz", 1700, "Lower values darken each pass through the feedback loop."),
+          control("delayDispersion", "Dispersion", 0, 100, 1, "%", 0, "Changes the spacing of the upper resonances while compensating the fundamental."),
+          control("strikeWidth", "Strike width", 0.5, 20, 0.1, " ms", 5.7, "Duration of the noise burst fed into the delay."),
+          control("strikeTone", "Strike tone", 200, 8500, 10, " Hz", 2600, "Upper cutoff of the initial noise burst."),
+          drive(5)],
+      },
+      ring: {
+        name: "Ring Mod", short: "Sum and difference tones", render: ringKick,
+        description: "Two tones multiply to produce a low difference tone and a higher, adjustable clang.",
+        controls: [tune(52), body(420), depth(17), speed(32),
+          control("ringRatio", "Lower oscillator ratio", 0.5, 9, 0.05, "×", 3.5, "Lower oscillator frequency relative to the difference tone."),
+          control("ringMix", "Clang level", 0, 100, 1, "%", 65, "Level of the upper sum tone."),
+          control("ringDecay", "Clang decay", 2, 600, 1, " ms", 102, "Time for the sum tone to fall by 40 dB."),
+          control("clangSweep", "Clang pitch envelope", -24, 24, 1, " st", 0, "Initial pitch offset for the clang alone, returning to zero over Clang decay."),
+          drive(3)],
+      },
+      fold: {
+        name: "Wavefold", short: "Folding harmonics", render: foldKick,
+        description: "A folding threshold reflects the sine's peaks back inward. The folds relax as the kick decays.",
+        controls: [tune(49), body(430), depth(16), speed(28),
+          control("folds", "Fold amount", 0, 10, 0.1, "×", 4.2, "Extra gain into the wavefolder at the start of the hit."),
+          control("foldDecay", "Fold decay", 2, 650, 1, " ms", 158, "Time for extra fold gain to fall by 40 dB."),
+          control("foldOffset", "Fold bias", -80, 80, 1, "%", 26, "Offsets the waveform to make the folding asymmetric."),
+          control("cleanSub", "Clean sub blend", 0, 100, 1, "%", 0, "Blend the clean sine into the folded body."),
+          drive(1)],
+      },
+      grains: {
+        name: "Grain Cloud", short: "Overlapping sine grains", render: grainKick,
+        description: "Short sine grains overlap at different pitches and phases, turning a kick into a fluttering burst.",
+        controls: [tune(55), body(470), depth(20), speed(70),
+          control("grainSize", "Grain size", 5, 100, 1, " ms", 29, "Length of each windowed grain."),
+          control("density", "Grain rate", 18, 220, 1, " Hz", 107, "Average number of grains started per second."),
+          control("densityEnvelope", "Density envelope", -3, 3, 0.1, " oct", 0, "Starting grain-rate offset. Negative starts sparse, positive starts dense. It settles over Sweep time."),
+          control("spray", "Pitch spread", 0, 24, 0.1, " st", 4.8, "Variation in pitch and starting phase from grain to grain."),
+          control("jitter", "Timing jitter", 0, 100, 1, "%", 35, "Variation in the spacing between grains."),
+          drive(4)],
+      },
+      logic: {
+        name: "Bit Logic", short: "Clocked logic oscillators", render: logicKick,
+        description: "A sample clock reads two digital ramps and combines their bits into a crunchy waveform.",
+        controls: [
+          control("tune", "Base tune", 25, 120, 0.1, " Hz", 48, "Frequency of the first ramp after the sweep settles."),
+          body(370), depth(25), speed(32),
+          control("logicRatio", "Ramp ratio", 1, 6, 0.05, "×", 2.05, "Frequency of the second ramp relative to the first."),
+          control("clock", "Sample clock", 500, 15000, 10, " Hz", 3560, "How often the logic output updates."),
+          control("bits", "Ramp bits", 3, 12, 1, " bits", 5, "Bit depth of each ramp before they are combined."),
+          operation,
+          control("logicTone", "Tone cutoff", 160, 8500, 10, " Hz", 1600, "Low-pass cutoff after the held output."),
+          drive(3)],
+      },
+      spectral: {
+        name: "Spectral Pulse", short: "Frequency-domain impact", render: spectralKick,
+        description: "A narrow bass band and a wider attack band are drawn in the frequency domain and turned into one hit.",
+        controls: [tune(54),
+          control("decay", "Body decay", 70, 850, 1, " ms", 345, "The bass band narrows as the target body decay gets longer."),
+          control("snapMix", "Snap level", 0, 100, 1, "%", 75, "Level of the broad attack band."),
+          control("snapCenter", "Snap center", 180, 3800, 10, " Hz", 720, "Center frequency of the attack band."),
+          control("snapBandwidth", "Snap bandwidth", 5, 100, 1, "%", 38, "Width of the attack band as a percentage of its center frequency."),
+          control("dispersion", "Snap dispersion", 0, 20, 0.1, " ms", 1.2, "Spreads different attack frequencies over time."),
+          drive(2)],
+      },
+    };
+
+    function renderKick(engine, patch) {
+      const duration = Math.max(patch.decay, patch.clickDecay || 0) * 1.5 / 1000 + 0.005;
+      const samples = new Float32Array(Math.ceil(rate * duration));
+      const voice = engine.render(patch, samples.length);
+      const boost = gain(patch.drive);
+      for (let i = 0; i < samples.length; i++) {
+        const time = i / rate;
+        const raw = voice(time, i);
+        const shaped = patch.drive > 0
+          ? raw + (Math.tanh(raw * boost) - raw) * Math.min(1, patch.drive / 5)
+          : raw;
+        const fade = Math.min(1, (samples.length - 1 - i) / 240);
+        samples[i] = shaped * fade;
+      }
+      return { samples };
+    }
+
+    function mixKicks(layers, masterGainDb) {
+      const length = layers.reduce((longest, layer) => Math.max(longest, layer.kick.samples.length), 1);
+      const samples = new Float32Array(length);
+      for (const { kick, level } of layers) {
+        const weight = level / 100;
+        for (let i = 0; i < kick.samples.length; i++) samples[i] += kick.samples[i] * weight;
+      }
+      const master = gain(masterGainDb);
+      let peak = 0;
+      for (let i = 0; i < length; i++) {
+        samples[i] *= master;
+        peak = Math.max(peak, Math.abs(samples[i]));
+      }
+      const trim = peak > 1 ? 1 / peak : 1;
+      if (trim < 1) {
+        for (let i = 0; i < length; i++) samples[i] *= trim;
+      }
+      return { samples, peak: peak * trim, trim };
+    }
+
+    function trimWaveTail({ samples, peak }) {
+      // Keep quieter mixes proportionally longer, down to the PCM rounding floor.
+      const threshold = Math.max(0.5 / 32768, Math.min(gain(-60), peak * gain(-50)));
+      let last = samples.length - 1;
+      while (last >= 0 && Math.abs(samples[last]) < threshold) last--;
+      if (last < 0) return new Float32Array(1);
+
+      const fadeFrames = Math.round(rate * 0.005);
+      const length = Math.min(samples.length, last + 1 + fadeFrames);
+      if (length === samples.length) return samples;
+
+      const trimmed = samples.slice(0, length);
+      for (let i = 1; i <= fadeFrames; i++) trimmed[last + i] *= 1 - i / fadeFrames;
+      return trimmed;
+    }
+
+    function defaultWaveName(date = new Date()) {
+      const pad = number => String(number).padStart(2, "0");
+      const day = [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("-");
+      const time = [date.getHours(), date.getMinutes(), date.getSeconds()].map(pad).join("-");
+      return "kick-" + day + "_" + time + ".wav";
+    }
+
+    function waveFile(samples) {
+      const data = new DataView(new ArrayBuffer(44 + samples.length * 2));
+      function tag(offset, name) {
+        for (let i = 0; i < name.length; i++) data.setUint8(offset + i, name.charCodeAt(i));
+      }
+      tag(0, "RIFF");
+      data.setUint32(4, data.byteLength - 8, true);
+      tag(8, "WAVE");
+      tag(12, "fmt ");
+      data.setUint32(16, 16, true);
+      data.setUint16(20, 1, true);
+      data.setUint16(22, 1, true);
+      data.setUint32(24, rate, true);
+      data.setUint32(28, rate * 2, true);
+      data.setUint16(32, 2, true);
+      data.setUint16(34, 16, true);
+      tag(36, "data");
+      data.setUint32(40, samples.length * 2, true);
+      samples.forEach((sample, i) => {
+        data.setInt16(44 + i * 2, Math.round(sample * (sample < 0 ? 32768 : 32767)), true);
+      });
+      return new Blob([data], { type: "audio/wav" });
+    }
+
+    const $ = id => document.getElementById(id);
+    const defaults = engine => Object.fromEntries(engine.controls.map(spec => [spec.key, spec.initial]));
+    const defaultMasterGainDb = -7;
+    const validGain = value => Number.isFinite(value) && value >= -30 && value <= 0;
+    const storageKey = "kick-lab-cards-v1";
+    const createLayer = (id, model) => ({
+      id, model, level: 100, muted: false, solo: false, settings: defaults(engines[model]),
+    });
+    let layers = [createLayer(1, "sweep")];
+    let selectedId = 1;
+    let nextLayerId = 2;
+    let tempo = 120;
+    let masterGainDb = defaultMasterGainDb;
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey));
+      if (validGain(saved?.masterGainDb)) masterGainDb = saved.masterGainDb;
+      if (Number.isInteger(saved?.tempo) && saved.tempo >= 40 && saved.tempo <= 220) tempo = saved.tempo;
+      if (Array.isArray(saved?.layers)) {
+        const ids = new Set();
+        layers = [];
+        for (const item of saved.layers) {
+          if (!item || !Object.hasOwn(engines, item.model) ||
+            !Number.isSafeInteger(item.id) || item.id < 1 || ids.has(item.id)) continue;
+          const layer = createLayer(item.id, item.model);
+          if (Number.isFinite(item.level) && item.level >= 0 && item.level <= 100) layer.level = item.level;
+          layer.solo = item.solo === true;
+          layer.muted = !layer.solo && item.muted === true;
+          for (const spec of engines[item.model].controls) {
+            const value = item.settings?.[spec.key];
+            if (Number.isFinite(value) && value >= spec.min && value <= spec.max &&
+              (!spec.options || Number.isInteger(value))) layer.settings[spec.key] = value;
+          }
+          ids.add(layer.id);
+          layers.push(layer);
+          nextLayerId = Math.max(nextLayerId, layer.id + 1);
+        }
+        if (Number.isSafeInteger(saved.nextLayerId)) nextLayerId = Math.max(nextLayerId, saved.nextLayerId);
+        selectedId = ids.has(saved.selectedId) ? saved.selectedId : layers[0]?.id ?? null;
+      }
+    } catch {
+      $("storage-note").textContent = "Your layers are saved for this session.";
+    }
+
+    function save() {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ layers, selectedId, nextLayerId, tempo, masterGainDb }));
+      } catch {
+        $("storage-note").textContent = "Your layers are saved for this session.";
+      }
+    }
+
+    function downloadFile(blob, name) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    const renderedLayers = new Map();
+    let rendered = null;
+    let frame = 0;
+    function isIncluded(layer, soloActive = layers.some(candidate => candidate.solo)) {
+      return soloActive ? layer.solo : !layer.muted;
+    }
+
+    const isAudible = layer => layer.level > 0 && isIncluded(layer);
+
+    function currentKick() {
+      if (!rendered) {
+        const soloActive = layers.some(layer => layer.solo);
+        const included = layers.filter(layer => layer.level > 0 && isIncluded(layer, soloActive));
+        const active = included.map(({ id, model, settings, level }) => {
+          if (!renderedLayers.has(id)) renderedLayers.set(id, renderKick(engines[model], settings));
+          return { kick: renderedLayers.get(id), level };
+        });
+        rendered = mixKicks(active, masterGainDb);
+      }
+      return rendered;
+    }
+
+    function invalidateMix() {
+      rendered = null;
+      scheduleDraw();
+    }
+
+    function invalidateLayer(layer) {
+      renderedLayers.delete(layer.id);
+      if (isAudible(layer)) invalidateMix();
+    }
+
+    function scheduleDraw() {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        draw();
+      });
+    }
+
+    function draw() {
+      const { samples, peak, trim } = currentKick();
+      const canvas = $("scope");
+      const bounds = canvas.getBoundingClientRect();
+      const width = Math.max(1, Math.round(bounds.width));
+      const height = Math.max(1, Math.round(bounds.height));
+      const scale = devicePixelRatio || 1;
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const context = canvas.getContext("2d");
+      context.scale(scale, scale);
+      const center = height / 2;
+      const plotMs = Math.max(100, Math.ceil(samples.length / rate * 1000 / 100) * 100);
+      const plotSamples = plotMs * rate / 1000;
+      context.strokeStyle = "#302929";
+      context.beginPath();
+      for (let i = 1; i < 8; i++) {
+        const x = Math.round(i * width / 8) + 0.5;
+        context.moveTo(x, 0);
+        context.lineTo(x, height);
+      }
+      for (const fraction of [0.25, 0.5, 0.75]) {
+        const y = Math.round(height * fraction) + 0.5;
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+      }
+      context.stroke();
+      context.strokeStyle = "#ff8058";
+      context.beginPath();
+      for (let x = 0; x < width; x++) {
+        const start = Math.floor(x * plotSamples / width);
+        const end = Math.min(samples.length, Math.floor((x + 1) * plotSamples / width));
+        let lo = samples[start] ?? 0;
+        let hi = lo;
+        for (let i = start + 1; i < end; i++) {
+          lo = Math.min(lo, samples[i]);
+          hi = Math.max(hi, samples[i]);
+        }
+        const top = center - hi * (center - 7);
+        const bottom = center - lo * (center - 7);
+        context.moveTo(x + 0.5, top);
+        context.lineTo(x + 0.5, Math.max(top + 1, bottom));
+      }
+      context.stroke();
+      const peakLabel = peak > 0 ? (20 * Math.log10(peak)).toFixed(1) + " dBFS" : "−∞ dBFS";
+      $("metrics").textContent = "Peak " + peakLabel;
+      $("metrics").title = trim < 1 ? "Clipping prevention applied " + (20 * Math.log10(trim)).toFixed(1) + " dB of mix trim." : "";
+      $("scope-mid").textContent = plotMs / 2 + " ms";
+      $("scope-end").textContent = plotMs + " ms";
+      canvas.setAttribute("aria-label", "Mix waveform, 0 to " + plotMs + " milliseconds, peak " + peakLabel);
+    }
+
+    const removeDialog = $("remove-dialog");
+    let removalCandidate = null;
+
+    removeDialog.addEventListener("close", () => {
+      const layer = removalCandidate;
+      removalCandidate = null;
+      if (layer && removeDialog.returnValue === "remove") removeLayer(layer);
+    });
+
+    function renderLayer(layer) {
+      const engine = engines[layer.model];
+      const row = document.createElement("div");
+      row.className = "layer-entry";
+      row.id = "layer-" + layer.id;
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = "layer-select";
+      select.id = "layer-select-" + layer.id;
+      select.setAttribute("aria-controls", "parameters");
+      select.title = engine.name + " · " + engine.short;
+      select.textContent = engine.name;
+      select.addEventListener("click", () => {
+        select.focus();
+        selectLayer(layer.id);
+      });
+      select.addEventListener("keydown", event => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const next = layers[layers.indexOf(layer) + (event.key === "ArrowDown" ? 1 : -1)];
+        event.preventDefault();
+        if (!next) return;
+        selectLayer(next.id);
+        $("layer-select-" + next.id).focus();
+      });
+      const actions = document.createElement("div");
+      actions.className = "layer-actions";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove-layer";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", "Remove " + engine.name);
+      remove.title = "Remove layer";
+      remove.addEventListener("click", () => requestLayerRemoval(layer));
+      const field = document.createElement("div");
+      field.className = "mix-control";
+      const label = document.createElement("label");
+      const slider = document.createElement("input");
+      const value = document.createElement("output");
+      const solo = document.createElement("button");
+      solo.type = "button";
+      solo.className = "solo-layer";
+      solo.textContent = "S";
+      solo.setAttribute("aria-label", "Solo " + engine.name);
+      const mute = document.createElement("button");
+      mute.type = "button";
+      mute.className = "mute-layer";
+      mute.textContent = "M";
+      mute.setAttribute("aria-label", "Mute " + engine.name);
+      actions.append(solo, mute);
+      slider.id = "mix-" + layer.id;
+      slider.className = "slider";
+      slider.type = "range";
+      slider.min = 0;
+      slider.max = 100;
+      slider.step = 1;
+      slider.value = layer.level;
+      slider.setAttribute("aria-label", engine.name + " mix");
+      label.htmlFor = slider.id;
+      label.textContent = "Mix";
+      value.htmlFor = slider.id;
+      function showMixControls() {
+        value.textContent = layer.level + "%";
+        slider.setAttribute("aria-valuetext", value.textContent + (layer.muted ? " (muted)" : ""));
+        mute.setAttribute("aria-pressed", layer.muted);
+        mute.title = layer.muted ? "Unmute layer" : "Mute layer";
+        solo.setAttribute("aria-pressed", layer.solo);
+        solo.title = layer.solo ? "Clear solo" : "Solo layer";
+        row.classList.toggle("is-muted", layer.muted);
+      }
+      showMixControls();
+      function toggleMixState(state, other) {
+        layer[state] = !layer[state];
+        if (layer[state]) layer[other] = false;
+        showMixControls();
+        invalidateMix();
+        save();
+      }
+      solo.addEventListener("click", () => toggleMixState("solo", "muted"));
+      mute.addEventListener("click", () => toggleMixState("muted", "solo"));
+      slider.addEventListener("input", () => {
+        layer.level = Number(slider.value);
+        showMixControls();
+        if (isIncluded(layer)) invalidateMix();
+      });
+      slider.addEventListener("change", save);
+      field.append(label, slider, value);
+      const randomize = document.createElement("button");
+      randomize.type = "button";
+      randomize.className = "layer-randomize";
+      randomize.setAttribute("aria-label", "Randomize " + engine.name);
+      randomize.title = "Randomize " + engine.name;
+      const dice = document.createElement("span");
+      dice.className = "dice-icon";
+      dice.setAttribute("aria-hidden", "true");
+      randomize.append(dice);
+      randomize.addEventListener("click", () => randomizeLayer(layer));
+      row.append(remove, select, actions, field, randomize);
+      return row;
+    }
+
+    function selectLayer(id) {
+      if (selectedId === id) return;
+      selectedId = id;
+      syncSelection();
+      save();
+    }
+
+    function syncSelection() {
+      $("stack-empty").hidden = layers.length > 0;
+      for (const layer of layers) {
+        const selected = layer.id === selectedId;
+        $("layer-" + layer.id).classList.toggle("is-selected", selected);
+        $("layer-select-" + layer.id).setAttribute("aria-pressed", selected);
+      }
+      const selected = layers.find(layer => layer.id === selectedId);
+      $("parameter-title").textContent = selected ? engines[selected.model].name : "Parameters";
+      $("parameter-description").textContent = selected ? engines[selected.model].description : "Add a layer to edit its parameters.";
+      displayControls(selected);
+    }
+
+    function addLayer(model) {
+      const layer = createLayer(nextLayerId++, model);
+      layers.push(layer);
+      selectedId = layer.id;
+      invalidateMix();
+      $("layers").append(renderLayer(layer));
+      syncSelection();
+      save();
+    }
+
+    const modelDialog = $("model-dialog");
+    for (const [model, engine] of Object.entries(engines)) {
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.className = "model-choice";
+      const name = document.createElement("strong");
+      name.id = "model-choice-" + model;
+      name.textContent = engine.name;
+      const description = document.createElement("span");
+      description.id = name.id + "-description";
+      description.textContent = engine.description;
+      choice.setAttribute("aria-labelledby", name.id);
+      choice.setAttribute("aria-describedby", description.id);
+      choice.append(name, description);
+      choice.addEventListener("click", () => {
+        addLayer(model);
+        modelDialog.close();
+      });
+      $("model-choices").append(choice);
+    }
+    $("add-layer").addEventListener("click", () => modelDialog.showModal());
+    $("model-cancel").addEventListener("click", () => modelDialog.close());
+
+    function requestLayerRemoval(layer) {
+      if (removalCandidate) return;
+      removalCandidate = layer;
+      $("remove-description").textContent = engines[layer.model].name;
+      removeDialog.returnValue = "";
+      removeDialog.showModal();
+    }
+
+    function removeLayer(layer) {
+      const index = layers.indexOf(layer);
+      if (index === -1) return;
+      layers.splice(index, 1);
+      renderedLayers.delete(layer.id);
+      invalidateMix();
+      $("layer-" + layer.id).remove();
+      const neighbor = layers[index] ?? layers[index - 1];
+      if (selectedId === layer.id) selectedId = neighbor?.id ?? null;
+      syncSelection();
+      save();
+      (selectedId === null ? $("add-layer") : $("layer-select-" + selectedId)).focus();
+    }
+
+    function displayControls(layer) {
+      const container = $("parameters");
+      container.replaceChildren();
+      if (!layer) return;
+      for (const spec of engines[layer.model].controls) {
+        const field = document.createElement("div");
+        field.className = "parameter";
+        const row = document.createElement("div");
+        row.className = "row";
+        const label = document.createElement("label");
+        const input = document.createElement(spec.options ? "select" : "input");
+        const value = document.createElement("output");
+        input.id = "param-" + layer.id + "-" + spec.key;
+        if (spec.options) {
+          input.append(...spec.options.map((name, index) => new Option(name, index)));
+        } else {
+          input.className = "slider";
+          input.type = "range";
+          input.min = spec.min;
+          input.max = spec.max;
+          input.step = spec.step;
+        }
+        input.value = layer.settings[spec.key];
+        input.title = spec.tip;
+        label.htmlFor = input.id;
+        label.textContent = spec.label;
+        value.htmlFor = input.id;
+        function showValue() {
+          if (spec.options) return;
+          const formatted = Number(input.value).toLocaleString(undefined, { maximumFractionDigits: 2 }) + spec.unit;
+          value.textContent = formatted;
+          input.setAttribute("aria-valuetext", formatted);
+        }
+        showValue();
+        input.addEventListener("input", () => {
+          layer.settings[spec.key] = Number(input.value);
+          showValue();
+          invalidateLayer(layer);
+        });
+        input.addEventListener("change", save);
+        row.append(label);
+        if (!spec.options) row.append(value);
+        field.append(row, input);
+        container.append(field);
+      }
+    }
+
+    function randomizeLayer(layer) {
+      for (const { key, min, max, step } of engines[layer.model].controls) {
+        const steps = Math.round((max - min) / step);
+        const index = Math.floor(Math.random() * (steps + 1));
+        const decimals = String(step).split(".")[1]?.length ?? 0;
+        layer.settings[key] = Number((min + index * step).toFixed(decimals));
+      }
+      invalidateLayer(layer);
+      if (layer.id === selectedId) displayControls(layer);
+      save();
+      if (loopTimer === null && isAudible(layer)) void trigger();
+    }
+    const exportDialog = $("export-dialog");
+    const exportName = $("export-name");
+    $("export").addEventListener("click", () => {
+      exportName.setCustomValidity("");
+      exportName.value = defaultWaveName();
+      exportDialog.showModal();
+      exportName.setSelectionRange(0, exportName.value.length - 4);
+    });
+    exportName.addEventListener("input", () => exportName.setCustomValidity(""));
+    $("export-cancel").addEventListener("click", () => exportDialog.close());
+    $("export-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const name = exportName.value.trim();
+      if (!name || /[<>:"/\\|?*\x00-\x1f]/.test(name)) {
+        exportName.setCustomValidity("Enter a file name without slashes or other reserved characters.");
+        exportName.reportValidity();
+        return;
+      }
+      const filename = /\.wav$/i.test(name) ? name : name + ".wav";
+      downloadFile(waveFile(trimWaveTail(currentKick())), filename);
+      exportDialog.close();
+    });
+
+    let audio;
+    let limiter;
+    let audioBuffer;
+    let bufferedKick;
+    let previousVoice;
+    let loopTimer = null;
+    let loopStarting = false;
+    let nextTime = 0;
+    const queued = new Set();
+
+    async function enableAudio() {
+      if (!audio) {
+        const Context = window.AudioContext || window.webkitAudioContext;
+        if (!Context) throw new Error("Web Audio is unavailable");
+        audio = new Context();
+        limiter = audio.createDynamicsCompressor();
+        limiter.threshold.value = -1;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.003;
+        limiter.connect(audio.destination);
+      }
+      if (audio.state !== "running") await audio.resume();
+      if (audio.state !== "running") throw new Error("Audio is suspended");
+      $("status").textContent = "Audio enabled";
+    }
+
+    function playAt(time) {
+      const kick = currentKick();
+      if (bufferedKick !== kick) {
+        audioBuffer = audio.createBuffer(1, kick.samples.length, rate);
+        audioBuffer.copyToChannel(kick.samples, 0);
+        bufferedKick = kick;
+      }
+      const source = audio.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(limiter);
+      const voice = { source, time };
+      source.onended = () => {
+        queued.delete(voice);
+        source.disconnect();
+        if (previousVoice === voice) previousVoice = undefined;
+      };
+      source.start(time);
+      return voice;
+    }
+
+    async function trigger() {
+      try {
+        await enableAudio();
+        if (previousVoice) {
+          const now = audio.currentTime;
+          if (now - previousVoice.time < 0.014) return;
+        }
+        previousVoice = playAt(audio.currentTime);
+      } catch {
+        $("status").textContent = "Audio unavailable. Try triggering again.";
+      }
+    }
+
+    function scheduleBeat() {
+      const now = audio.currentTime;
+      if (nextTime < now) nextTime = now + 0.005;
+      if (nextTime > now + 0.07) return;
+      queued.add(playAt(nextTime));
+      nextTime += 60 / tempo;
+    }
+
+    function stopLoop() {
+      clearInterval(loopTimer);
+      loopTimer = null;
+      for (const voice of queued) {
+        if (voice.time > audio.currentTime) voice.source.stop();
+      }
+      $("loop").textContent = "Start loop";
+      $("loop").setAttribute("aria-pressed", false);
+      $("loop").classList.remove("loop-on");
+    }
+
+    $("loop").addEventListener("click", async () => {
+      if (loopTimer !== null) return stopLoop();
+      if (loopStarting) return;
+      loopStarting = true;
+      try {
+        await enableAudio();
+        nextTime = audio.currentTime + 0.015;
+        scheduleBeat();
+        loopTimer = setInterval(scheduleBeat, 24);
+        $("loop").textContent = "Stop loop";
+        $("loop").setAttribute("aria-pressed", true);
+        $("loop").classList.add("loop-on");
+      } catch {
+        $("status").textContent = "Audio unavailable. Try starting the loop again.";
+      } finally {
+        loopStarting = false;
+      }
+    });
+    $("tempo").value = tempo;
+    $("tempo-value").textContent = tempo + " BPM";
+    $("tempo").addEventListener("input", event => {
+      tempo = Number(event.target.value);
+      $("tempo-value").textContent = tempo + " BPM";
+    });
+    $("tempo").addEventListener("change", save);
+    $("output-gain").value = masterGainDb;
+    $("output-gain-value").textContent = masterGainDb + " dB";
+    $("output-gain").addEventListener("input", event => {
+      masterGainDb = Number(event.target.value);
+      $("output-gain-value").textContent = masterGainDb + " dB";
+      invalidateMix();
+    });
+    $("output-gain").addEventListener("change", save);
+    $("trigger").addEventListener("click", trigger);
+    window.addEventListener("keydown", event => {
+      if (event.code !== "Space" || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.target.closest("button, select, input, textarea, a, [contenteditable]")) return;
+      event.preventDefault();
+      void trigger();
+    });
+    new ResizeObserver(scheduleDraw).observe($("scope"));
+    for (const layer of layers) $("layers").append(renderLayer(layer));
+    syncSelection();
+    scheduleDraw();
+  </script>
+</body>
+</html>
