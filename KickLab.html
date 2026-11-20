@@ -36,6 +36,7 @@
       align-items: start; gap: 14px; margin-top: 18px;
     }
     .stack-head { flex-wrap: wrap; margin-bottom: 10px; }
+    .stack-actions { display: flex; gap: 6px; margin-left: auto; }
     .stack-head button, .model-picker-head button { padding: 0 10px; }
     .layer-list { display: grid; gap: 6px; }
     .layer-entry {
@@ -177,6 +178,8 @@
           <input class="slider" type="range" id="tempo" min="40" max="220" value="120">
           <div class="row"><label for="output-gain">Output gain</label><output id="output-gain-value" for="output-gain">-7 dB</output></div>
           <input class="slider" type="range" id="output-gain" min="-30" max="0" step="0.1" value="-7">
+          <div class="row"><label for="output-lowpass">Output low-pass</label><output id="output-lowpass-value" for="output-lowpass">Off</output></div>
+          <input class="slider" type="range" id="output-lowpass" min="0" max="101" value="101" aria-valuetext="Off">
         </div>
       </div>
     </section>
@@ -184,7 +187,10 @@
       <section class="card stack" aria-labelledby="stack-title">
         <div class="row stack-head">
           <h2 id="stack-title">Layers</h2>
-          <button type="button" id="add-layer" aria-haspopup="dialog">Add layer</button>
+          <div class="stack-actions">
+            <button type="button" id="feeling-lucky">Feeling Lucky</button>
+            <button type="button" id="add-layer" aria-haspopup="dialog">Add layer</button>
+          </div>
         </div>
         <p class="stack-empty" id="stack-empty" hidden>Add a layer to get started.</p>
         <div class="layer-list" id="layers"></div>
@@ -365,22 +371,16 @@
       const real = 1 - pole * Math.cos(radians);
       const imaginary = pole * Math.sin(radians);
       const filterDelay = Math.atan2(imaginary, real) / radians;
-      const allpass = 1 - 1.92 * p.delayDispersion / 100;
-      const sin = Math.sin(radians);
-      const cos = Math.cos(radians);
-      const dispersionDelay = (Math.atan2(sin, allpass + cos) -
-        Math.atan2(allpass * sin, 1 + allpass * cos)) / radians;
-      const delay = period - filterDelay - dispersionDelay;
+      const delay = period - filterDelay;
       const loopMagnitude = (1 - pole) / Math.hypot(real, imaginary);
       const feedback = Math.min(0.9999, decay(1 / p.tune, p.decay) / loopMagnitude);
       const buffer = new Float32Array(Math.ceil(period) + 1);
       const excitation = noiseBand(80, p.strikeTone);
       const strikeTime = p.strikeWidth / 1000;
+      const strikeAdjustment = p.strikeMix / 100 - 1;
       const dcTracking = 1 - Math.exp(-turn * 14 / rate);
       let write = 0;
       let filtered = 0;
-      let previousInput = 0;
-      let previousOutput = 0;
       let dc = 0;
       return t => {
         const read = (write + buffer.length - delay) % buffer.length;
@@ -388,18 +388,14 @@
         const first = buffer[index];
         const delayed = first + (buffer[(index + 1) % buffer.length] - first) * (read - index);
         filtered += (1 - pole) * (delayed - filtered);
-        let loop = filtered;
-        if (p.delayDispersion > 0) {
-          loop = allpass * filtered + previousInput - allpass * previousOutput;
-          previousInput = filtered;
-          previousOutput = loop;
-        }
-        const strike = t < strikeTime ? excitation() * Math.sin(Math.PI * t / strikeTime) : 0;
-        const sample = loop * feedback + strike * 0.85;
+        const strike = t < strikeTime ? excitation() * Math.sin(Math.PI * t / strikeTime) * 0.85 : 0;
+        const sample = filtered * feedback + strike;
         buffer[write] = sample;
         write = (write + 1) % buffer.length;
-        dc += dcTracking * (sample - dc);
-        return sample - dc;
+        // Adjust the direct strike after feeding the loop so its ringing stays the same.
+        const output = sample + strike * strikeAdjustment;
+        dc += dcTracking * (output - dc);
+        return output - dc;
       };
     }
 
@@ -676,7 +672,7 @@
         description: "A short strike recirculates through a tuned delay, building a hollow body with a bright initial attack.",
         controls: [tune(64), body(520),
           control("dampTone", "Loop cutoff", 250, 8500, 10, " Hz", 1700, "Lower values darken each pass through the feedback loop."),
-          control("delayDispersion", "Dispersion", 0, 100, 1, "%", 0, "Changes the spacing of the upper resonances while compensating the fundamental."),
+          control("strikeMix", "Strike Mix", 0, 200, 1, "%", 100, "Level of the direct strike. 100% is the normal level, and the ringing body stays the same."),
           control("strikeWidth", "Strike width", 0.5, 20, 0.1, " ms", 5.7, "Duration of the noise burst fed into the delay."),
           control("strikeTone", "Strike tone", 200, 8500, 10, " Hz", 2600, "Upper cutoff of the initial noise burst."),
           drive(5)],
@@ -755,13 +751,38 @@
       return { samples };
     }
 
-    function mixKicks(layers, masterGainDb) {
-      const length = layers.reduce((longest, layer) => Math.max(longest, layer.kick.samples.length), 1);
+    function filterLowpass(samples, cutoff) {
+      // Two-pole Butterworth low-pass, implemented as a transposed direct-form II biquad.
+      const k = Math.tan(Math.PI * cutoff / rate);
+      const kSquared = k * k;
+      const normalization = 1 / (1 + Math.SQRT2 * k + kSquared);
+      const b0 = kSquared * normalization;
+      const b1 = 2 * b0;
+      const a1 = 2 * (kSquared - 1) * normalization;
+      const a2 = (1 - Math.SQRT2 * k + kSquared) * normalization;
+      let state1 = 0;
+      let state2 = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const input = samples[i];
+        const output = b0 * input + state1;
+        state1 = b1 * input - a1 * output + state2;
+        state2 = b0 * input - a2 * output;
+        samples[i] = output;
+      }
+    }
+
+    function mixKicks(layers, masterGainDb, cutoff) {
+      const layerLength = layers.reduce((longest, layer) => Math.max(longest, layer.kick.samples.length), 1);
+      const filtered = cutoff !== null && layers.length > 0;
+      // Leave room for the filter to settle after the last input sample.
+      const tailLength = filtered ? Math.ceil(rate * Math.max(0.005, 3 / cutoff)) : 0;
+      const length = layerLength + tailLength;
       const samples = new Float32Array(length);
       for (const { kick, level } of layers) {
         const weight = level / 100;
         for (let i = 0; i < kick.samples.length; i++) samples[i] += kick.samples[i] * weight;
       }
+      if (filtered) filterLowpass(samples, cutoff);
       const master = gain(masterGainDb);
       let peak = 0;
       for (let i = 0; i < length; i++) {
@@ -826,19 +847,30 @@
     const defaults = engine => Object.fromEntries(engine.controls.map(spec => [spec.key, spec.initial]));
     const defaultMasterGainDb = -7;
     const validGain = value => Number.isFinite(value) && value >= -30 && value <= 0;
+    const lowpassSlider = $("output-lowpass");
+    const lowpassOff = Number(lowpassSlider.max);
     const storageKey = "kick-lab-cards-v1";
+    const maxLayerLevel = 100;
     const createLayer = (id, model) => ({
-      id, model, level: 100, muted: false, solo: false, settings: defaults(engines[model]),
+      id, model, level: maxLayerLevel, muted: false, solo: false, settings: defaults(engines[model]),
     });
     let layers = [createLayer(1, "sweep")];
     let selectedId = 1;
     let nextLayerId = 2;
     let tempo = 120;
     let masterGainDb = defaultMasterGainDb;
+    let lowpassStep = lowpassOff;
+
+    function outputCutoff() {
+      return lowpassStep === lowpassOff ? null : Math.round(40 * (20000 / 40) ** (lowpassStep / (lowpassOff - 1)));
+    }
 
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey));
       if (validGain(saved?.masterGainDb)) masterGainDb = saved.masterGainDb;
+      if (Number.isInteger(saved?.lowpassStep) && saved.lowpassStep >= 0 && saved.lowpassStep <= lowpassOff) {
+        lowpassStep = saved.lowpassStep;
+      }
       if (Number.isInteger(saved?.tempo) && saved.tempo >= 40 && saved.tempo <= 220) tempo = saved.tempo;
       if (Array.isArray(saved?.layers)) {
         const ids = new Set();
@@ -847,7 +879,7 @@
           if (!item || !Object.hasOwn(engines, item.model) ||
             !Number.isSafeInteger(item.id) || item.id < 1 || ids.has(item.id)) continue;
           const layer = createLayer(item.id, item.model);
-          if (Number.isFinite(item.level) && item.level >= 0 && item.level <= 100) layer.level = item.level;
+          if (Number.isFinite(item.level) && item.level >= 0 && item.level <= maxLayerLevel) layer.level = item.level;
           layer.solo = item.solo === true;
           layer.muted = !layer.solo && item.muted === true;
           for (const spec of engines[item.model].controls) {
@@ -868,7 +900,7 @@
 
     function save() {
       try {
-        localStorage.setItem(storageKey, JSON.stringify({ layers, selectedId, nextLayerId, tempo, masterGainDb }));
+        localStorage.setItem(storageKey, JSON.stringify({ layers, selectedId, nextLayerId, tempo, masterGainDb, lowpassStep }));
       } catch {
         $("storage-note").textContent = "Your layers are saved for this session.";
       }
@@ -900,7 +932,7 @@
           if (!renderedLayers.has(id)) renderedLayers.set(id, renderKick(engines[model], settings));
           return { kick: renderedLayers.get(id), level };
         });
-        rendered = mixKicks(active, masterGainDb);
+        rendered = mixKicks(active, masterGainDb, outputCutoff());
       }
       return rendered;
     }
@@ -1038,7 +1070,7 @@
       slider.className = "slider";
       slider.type = "range";
       slider.min = 0;
-      slider.max = 100;
+      slider.max = maxLayerLevel;
       slider.step = 1;
       slider.value = layer.level;
       slider.setAttribute("aria-label", engine.name + " mix");
@@ -1115,6 +1147,24 @@
       save();
     }
 
+    function generateRandomLayers() {
+      const models = Object.keys(engines);
+      const count = 1 + Math.floor(Math.random() * 10);
+      layers = Array.from({ length: count }, () => {
+        const model = models[Math.floor(Math.random() * models.length)];
+        const layer = createLayer(nextLayerId++, model);
+        randomizeSettings(layer);
+        layer.level = Math.floor(Math.random() * (maxLayerLevel + 1));
+        return layer;
+      });
+      selectedId = layers[0].id;
+      renderedLayers.clear();
+      invalidateMix();
+      $("layers").replaceChildren(...layers.map(renderLayer));
+      syncSelection();
+      save();
+    }
+
     const modelDialog = $("model-dialog");
     for (const [model, engine] of Object.entries(engines)) {
       const choice = document.createElement("button");
@@ -1135,6 +1185,7 @@
       });
       $("model-choices").append(choice);
     }
+    $("feeling-lucky").addEventListener("click", generateRandomLayers);
     $("add-layer").addEventListener("click", () => modelDialog.showModal());
     $("model-cancel").addEventListener("click", () => modelDialog.close());
 
@@ -1207,13 +1258,17 @@
       }
     }
 
-    function randomizeLayer(layer) {
+    function randomizeSettings(layer) {
       for (const { key, min, max, step } of engines[layer.model].controls) {
         const steps = Math.round((max - min) / step);
         const index = Math.floor(Math.random() * (steps + 1));
         const decimals = String(step).split(".")[1]?.length ?? 0;
         layer.settings[key] = Number((min + index * step).toFixed(decimals));
       }
+    }
+
+    function randomizeLayer(layer) {
+      randomizeSettings(layer);
       invalidateLayer(layer);
       if (layer.id === selectedId) displayControls(layer);
       save();
@@ -1354,6 +1409,20 @@
       invalidateMix();
     });
     $("output-gain").addEventListener("change", save);
+    function showOutputLowpass() {
+      const cutoff = outputCutoff();
+      const label = cutoff === null ? "Off" : cutoff + " Hz";
+      $("output-lowpass-value").textContent = label;
+      lowpassSlider.setAttribute("aria-valuetext", label);
+    }
+    lowpassSlider.value = lowpassStep;
+    showOutputLowpass();
+    lowpassSlider.addEventListener("input", () => {
+      lowpassStep = Number(lowpassSlider.value);
+      showOutputLowpass();
+      invalidateMix();
+    });
+    lowpassSlider.addEventListener("change", save);
     $("trigger").addEventListener("click", trigger);
     window.addEventListener("keydown", event => {
       if (event.code !== "Space" || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
