@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Snare Lab</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #f2ede7;
+      background: #141818;
+      --panel: #1d2323;
+      --edge: #35403e;
+      --muted: #acbab7;
+      --accent: #77d7c0;
+      --mono: "Cascadia Mono", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, select, input { font: inherit; }
+    button, select {
+      color: inherit; background: #262e2d; border: 1px solid var(--edge);
+      border-radius: 8px; min-height: 42px; cursor: pointer;
+    }
+    button:hover, select:hover { border-color: #5f9286; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    main { max-width: 1180px; margin: auto; padding: 36px 30px 30px; }
+    header { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 23px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(2.7rem, 6vw, 4.2rem); letter-spacing: -.075em; line-height: .98; }
+    h1 span { color: var(--accent); }
+    .status { color: var(--muted); font: .82rem var(--mono); text-align: right; }
+    .editor-workspace {
+      display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+      align-items: start; gap: 14px; margin-top: 18px;
+    }
+    .stack-head { flex-wrap: wrap; margin-bottom: 10px; }
+    .stack-actions { display: flex; gap: 6px; margin-left: auto; }
+    .stack-head button, .model-picker-head button { padding: 0 10px; }
+    .layer-list { display: grid; gap: 6px; }
+    .layer-entry {
+      display: grid; grid-template-columns: 34px minmax(0, 1fr) auto minmax(90px, 1fr) 34px;
+      align-items: center; gap: 7px; padding: 6px;
+      border: 1px solid var(--edge); border-radius: 8px;
+    }
+    .layer-entry.is-selected { background: #233630; border-color: var(--accent); }
+    .stack-empty { color: var(--muted); margin-top: 5px; }
+    .layer-select {
+      min-height: 34px; padding: 4px; text-align: left; font-size: .87rem;
+      min-width: 0; font-weight: 650; border: 0; background: transparent;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .layer-select:hover, .layer-select[aria-pressed="true"] { color: #a9ecdc; }
+    .layer-select:focus-visible { outline: none; }
+    .layer-entry.is-selected,
+    .layer-entry:has(> .layer-select:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .layer-actions { display: flex; gap: 4px; }
+    .layer-actions button, .remove-layer, .layer-randomize {
+      display: inline-grid; place-items: center; width: 34px; height: 34px; min-height: 34px; padding: 0;
+    }
+    .remove-layer { font-size: 1.2rem; color: var(--muted); }
+    .dice-icon {
+      --pip: currentColor 1px, transparent 1.2px;
+      --corner-pips: radial-gradient(circle at 26% 26%, var(--pip)),
+        radial-gradient(circle at 74% 26%, var(--pip)),
+        radial-gradient(circle at 26% 74%, var(--pip)),
+        radial-gradient(circle at 74% 74%, var(--pip));
+      position: relative; width: 25px; height: 24px; background-color: inherit;
+    }
+    .dice-icon::before, .dice-icon::after {
+      content: ""; position: absolute; box-sizing: border-box;
+      width: 16px; height: 16px; border: 1.4px solid currentColor; border-radius: 3px;
+      background-color: inherit; background-image: var(--corner-pips);
+    }
+    .dice-icon::before { top: 2px; right: 2px; transform: rotate(19deg); }
+    .dice-icon::after {
+      bottom: 1px; left: 1px; transform: rotate(-19deg);
+      background-image: radial-gradient(circle at center, var(--pip)), var(--corner-pips);
+    }
+    .mix-control { display: grid; grid-template-columns: auto minmax(0, 1fr) 4ch; align-items: center; gap: 5px; min-width: 0; }
+    .mix-control label { font-size: .8rem; }
+    .mix-control output { text-align: right; }
+    .solo-layer, .mute-layer { font: 800 1rem Arial, sans-serif; }
+    .solo-layer[aria-pressed="true"] { color: #152218; background: #a5d7ad; border-color: #a5d7ad; }
+    .mute-layer[aria-pressed="true"] { color: #10211d; background: var(--accent); border-color: var(--accent); }
+    .layer-entry.is-muted .mix-control > .slider { opacity: .55; }
+    .parameter-description { color: var(--muted); font-size: .88rem; margin-top: 6px; }
+    .audition-body { display: grid; grid-template-columns: minmax(0, 2.15fr) minmax(255px, 1fr); gap: 20px; margin-top: 14px; }
+    .audition-body h3 { font-size: .95rem; }
+    .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; min-width: 0; padding: 19px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    h2 { font-size: 1.14rem; letter-spacing: -.015em; }
+    label, .muted { color: var(--muted); }
+    .scope { margin-top: 13px; }
+    canvas { display: block; width: 100%; height: 161px; background: #151a19; border: 1px solid #34413e; border-radius: 7px; }
+    .scope-axis { display: flex; justify-content: space-between; color: var(--muted); margin-top: 5px; font: .79rem var(--mono); }
+    .metrics, output { color: #a9ecdc; font: .82rem var(--mono); white-space: nowrap; }
+    .transport { display: grid; align-content: start; gap: 12px; }
+    .trigger { background: var(--accent); color: #10211d; border-color: var(--accent); font-weight: 750; }
+    .trigger:hover { background: #a9ecdc; }
+    .loop-on { border-color: var(--accent); color: #a9ecdc; }
+    .transport label { font-size: .88rem; }
+    .slider { width: 100%; min-width: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .audition-head button { padding: 0 8px; font-size: .85rem; min-height: 34px; }
+    .dialog-card { width: min(420px, calc(100% - 32px)); color: inherit; }
+    .dialog-card::backdrop { background: rgb(0 0 0 / 65%); }
+    .model-picker { width: min(900px, calc(100% - 32px)); max-height: calc(100% - 32px); }
+    .model-picker-head { margin-bottom: 12px; }
+    .model-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .model-choice {
+      display: grid; align-content: start; gap: 6px; min-width: 0;
+      padding: 12px; text-align: left; background: #242c2b;
+    }
+    .model-choice:hover { border-color: var(--accent); background: #233630; }
+    .model-choice strong { font-size: .95rem; }
+    .model-choice span { color: var(--muted); font-size: .875rem; line-height: 1.35; }
+    .dialog-form { display: grid; gap: 12px; }
+    .export-name { width: 100%; color: inherit; background: #151a19; border: 1px solid var(--edge); border-radius: 7px; padding: 9px 10px; }
+    .dialog-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
+    .dialog-actions button { padding: 0 12px; }
+    select {
+      appearance: none; padding-right: 27px !important;
+      background-image: linear-gradient(45deg, transparent 50%, #c6b9b3 50%), linear-gradient(135deg, #c6b9b3 50%, transparent 50%);
+      background-position: right 13px center, right 9px center;
+      background-size: 4px 4px; background-repeat: no-repeat;
+    }
+    .form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; margin-top: 9px; }
+    .parameter { min-width: 0; border-top: 1px solid var(--edge); padding: 7px 0 6px; display: grid; grid-template-rows: 1fr auto; gap: 4px; }
+    .parameter .row { flex-wrap: wrap; align-items: baseline; align-content: start; gap: 3px 5px; }
+    .parameter label { color: #e5dcd6; font-size: .85rem; line-height: 1.2; overflow-wrap: anywhere; }
+    .parameter output { font-size: .75rem; }
+    .parameter select { min-height: 27px; min-width: 0; width: 100%; padding: 2px 6px; font-size: .82rem; }
+    .footer { display: flex; justify-content: space-between; gap: 10px; margin-top: 13px; font-size: .81rem; color: var(--muted); flex-wrap: wrap; }
+    @media (max-width: 1050px) {
+      .layer-entry { grid-template-columns: 34px minmax(0, 1fr) auto 34px; }
+      .layer-actions { grid-column: 3 / -1; justify-self: end; }
+      .layer-entry .mix-control { grid-column: 2 / 4; grid-row: 2; }
+      .layer-randomize { grid-column: 4; grid-row: 2; }
+    }
+    @media (max-width: 780px) {
+      .editor-workspace { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 740px) {
+      main { padding: 24px 16px; }
+      .audition-body { grid-template-columns: 1fr; }
+      .card { padding: 15px; }
+      .model-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 460px) {
+      .model-choices { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Snare<span> Lab</span></h1>
+      <p class="status" id="status" role="status">Audio ready on trigger</p>
+    </header>
+    <section class="card" aria-labelledby="transport-title">
+      <div class="row audition-head">
+        <h2 id="transport-title">Audition</h2>
+        <button type="button" id="export">Export WAV</button>
+      </div>
+      <div class="audition-body">
+        <div>
+          <div class="row"><h3>Mix waveform</h3><span class="metrics" id="metrics"></span></div>
+          <div class="scope">
+            <canvas id="scope" role="img" aria-label="Synthesized snare waveform"></canvas>
+            <div class="scope-axis" aria-hidden="true"><span>0 ms</span><span id="scope-mid"></span><span id="scope-end"></span></div>
+          </div>
+        </div>
+        <div class="transport">
+          <button type="button" class="trigger" id="trigger">Trigger snare</button>
+          <button type="button" id="loop" aria-pressed="false">Start loop</button>
+          <div class="row"><label for="tempo">Tempo</label><output id="tempo-value" for="tempo">120 BPM</output></div>
+          <input class="slider" type="range" id="tempo" min="40" max="220" value="120">
+          <div class="row"><label for="output-gain">Output gain</label><output id="output-gain-value" for="output-gain">-7 dB</output></div>
+          <input class="slider" type="range" id="output-gain" min="-30" max="0" step="0.1" value="-7">
+        </div>
+      </div>
+    </section>
+    <div class="editor-workspace">
+      <section class="card stack" aria-labelledby="stack-title">
+        <div class="row stack-head">
+          <h2 id="stack-title">Layers</h2>
+          <div class="stack-actions">
+            <button type="button" id="feeling-lucky" title="Replace the layer stack and audition it when the loop is stopped">Feeling Lucky</button>
+            <button type="button" id="add-layer" aria-haspopup="dialog">Add layer</button>
+          </div>
+        </div>
+        <p class="stack-empty" id="stack-empty" hidden>Add a layer to get started.</p>
+        <div class="layer-list" id="layers"></div>
+      </section>
+      <section class="card parameter-pane" aria-labelledby="parameter-title">
+        <h2 id="parameter-title">Parameters</h2>
+        <p class="parameter-description" id="parameter-description"></p>
+        <div class="form" id="parameters"></div>
+      </section>
+    </div>
+    <div class="footer"><span id="storage-note">Your layers are saved in this browser.</span><span>Mono · 48 kHz · Decay measured to −40 dB</span></div>
+  </main>
+  <dialog class="card dialog-card model-picker" id="model-dialog" aria-labelledby="model-dialog-title">
+    <div class="row model-picker-head">
+      <h2 id="model-dialog-title">Add layer</h2>
+      <button type="button" id="model-cancel" autofocus>Cancel</button>
+    </div>
+    <div class="model-choices" id="model-choices"></div>
+  </dialog>
+  <dialog class="card dialog-card" id="export-dialog" aria-labelledby="export-title">
+    <form class="dialog-form" id="export-form">
+      <h2 id="export-title">Export WAV</h2>
+      <label for="export-name">File name</label>
+      <input class="export-name" id="export-name" type="text" required maxlength="120" spellcheck="false" autofocus>
+      <div class="dialog-actions">
+        <button type="button" id="export-cancel">Cancel</button>
+        <button type="submit" class="trigger">Download WAV</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="card dialog-card" id="remove-dialog" aria-labelledby="remove-title" aria-describedby="remove-description">
+    <form class="dialog-form" method="dialog">
+      <h2 id="remove-title">Remove layer?</h2>
+      <p class="muted" id="remove-description"></p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" autofocus>Cancel</button>
+        <button type="submit" value="remove" class="trigger">Remove layer</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    // Synthesis produces the same samples for the scope, playback, and export.
+    const rate = 48000;
+    const turn = 2 * Math.PI;
+    const decay = (seconds, ms) => Math.exp(-Math.LN10 * 2 * seconds / (ms * 0.001));
+    const gain = db => 10 ** (db / 20);
+    const attack = t => Math.min(1, t / 0.0007);
+    const sweptPitch = (t, p) => p.tune * 2 ** (p.sweep / 12 * decay(t, p.sweepTime));
+
+    function whiteNoise(layerId) {
+      // Repeatable for A/B comparisons, with an independent stream per layer.
+      let seed = Math.imul(layerId, 0x56d62e11) || 1;
+      return () => {
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        return (seed >>> 0) / 2147483648 - 1;
+      };
+    }
+
+    function noiseBand(nextNoise, low, high) {
+      let lowState = 0;
+      let highState = 0;
+      const lowStep = 1 - Math.exp(-turn * low / rate);
+      const highStep = 1 - Math.exp(-turn * high / rate);
+      return () => {
+        const noise = nextNoise();
+        lowState += lowStep * (noise - lowState);
+        highState += highStep * (noise - highState);
+        return 2 * (highState - lowState);
+      };
+    }
+
+    function pitchSweepBody(p, nextNoise) {
+      let phase = 0;
+      const click = p.click > 0 ? noiseBand(nextNoise, 900, p.clickTone) : null;
+      const curvature = 2 ** (p.sweepCurve / 50);
+      const duration = p.sweepTime / 1000;
+      return t => {
+        const body = 0.7 * Math.sin(phase) * decay(t, p.bodyDecay);
+        const sweepPosition = p.sweepCurve === 0 ? t : duration * (t / duration) ** curvature;
+        phase += turn * sweptPitch(sweepPosition, p) / rate;
+        const transient = click ? click() * decay(t, p.clickDecay) * p.click / 100 : 0;
+        return (body + transient) * attack(t);
+      };
+    }
+
+    function resonatorBody(p) {
+      // A finite bipolar strike excites a damped pair of quadrature states.
+      let real = 0;
+      let imaginary = 0;
+      let filtered = 0;
+      const damping = decay(1 / rate, p.bodyDecay);
+      const tone = 1 - Math.exp(-turn * p.tone / rate);
+      const pulseWidth = p.exciterWidth / 1000;
+      const pulseGain = p.impact / 100 * Math.min(1, 0.0005 / pulseWidth);
+      return t => {
+        const frequency = sweptPitch(t, p) * 2 ** (p.drift / 12 * decay(t, 90));
+        const angle = turn * frequency / rate;
+        const cosine = Math.cos(angle);
+        const sine = Math.sin(angle);
+        const pulse = t < pulseWidth ? Math.sin(turn * t / pulseWidth) * pulseGain : 0;
+        const previous = real;
+        real = damping * (real * cosine - imaginary * sine);
+        imaginary = damping * (imaginary * cosine + previous * sine + pulse);
+        filtered += tone * (real * 1.5 + pulse * 0.32 - filtered);
+        return 0.3 * filtered;
+      };
+    }
+
+    function modalBody(p) {
+      const modes = [
+        { ratio: 1, level: 0.86, length: 1, edgeWeight: -0.55 },
+        { ratio: 1.59, level: 0.57, length: 0.66, edgeWeight: 0.7 },
+        { ratio: 2.14, level: 0.37, length: 0.45, edgeWeight: -0.4 },
+        { ratio: 2.92, level: 0.21, length: 0.25, edgeWeight: 0.9 },
+        { ratio: 3.60, level: 0.12, length: 0.17, edgeWeight: 0.8 },
+      ];
+      const position = (p.strikePosition - 50) / 50;
+      const partials = modes.map((mode, index) => {
+        const length = index === 0 ? p.bodyDecay : p.bodyDecay * mode.length / (0.5 + p.damping / 55);
+        const level = index === 0 ? mode.level : mode.level * p.resonance / 100;
+        return { angle: turn * mode.ratio * p.tune, length, level: level * (1 + position * mode.edgeWeight) };
+      });
+      return t => {
+        let sample = 0;
+        for (const mode of partials) {
+          sample += Math.sin(mode.angle * t) * decay(t, mode.length) * mode.level;
+        }
+        return 0.8 * attack(t) * sample;
+      };
+    }
+
+    function wireVoice(p, nextNoise) {
+      const band = noiseBand(nextNoise, p.wireTone / 3, p.wireTone * 2);
+      const delay = p.wireDelay / 1000;
+      return t => {
+        const noise = band();
+        const age = t - delay;
+        if (age <= 0) return 0;
+        return noise * attack(age) * decay(age, p.wireDecay);
+      };
+    }
+
+    function noiseSweepWires(p, nextNoise) {
+      let bandState = 0;
+      let lowState = 0;
+      const delay = p.wireDelay / 1000;
+      const grain = 0.425 * p.grain / 100;
+      const sweepTimeMs = 62;
+      const sweepOctaves = 7 / 12;
+      const focusSweepOctaves = -0.25;
+      return t => {
+        const noise = nextNoise();
+        const age = t - delay;
+        if (age <= 0) return 0;
+
+        const sweep = decay(age, sweepTimeMs);
+        const frequency = p.wireTone * 2 ** (sweepOctaves * sweep);
+        const focus = Math.min(3.5, Math.max(0.35, p.focus * 2 ** (focusSweepOctaves * sweep)));
+        const damping = 1 / focus;
+        // The moving state-variable band-pass is adapted from Kick Lab's Noise Sweep.
+        const g = Math.tan(Math.PI * frequency / rate);
+        const band = (bandState + g * (noise - lowState)) / (1 + g * (g + damping));
+        const low = lowState + g * band;
+        bandState = 2 * band - bandState;
+        lowState = 2 * low - lowState;
+
+        const compensation = 0.55 * Math.sqrt(rate / (frequency * focus));
+        const texture = 1 + grain * Math.sin(turn * 73 * age);
+        return band * compensation * texture * attack(age) * decay(age, p.wireDecay);
+      };
+    }
+
+    function rimShot(p, nextNoise) {
+      const click = noiseBand(nextNoise, 1200, p.clickTone);
+      return t => attack(t) * (
+        0.28 * Math.sin(turn * p.rimPitch * t) * decay(t, p.bodyDecay) +
+        0.16 * Math.sin(turn * p.rimPitch * 1.67 * t) * decay(t, p.bodyDecay * 0.55) +
+        0.63 * click() * decay(t, p.clickDecay)
+      );
+    }
+
+    const control = (key, label, min, max, step, unit, initial, tip) =>
+      ({ key, label, min, max, step, unit, initial, tip });
+    const tune = (value, tip = "Lowest frequency of the drumhead.") => control("tune", "Head pitch", 110, 430, 1, " Hz", value, tip);
+    const bodyDecay = value => control("bodyDecay", "Body decay", 25, 400, 1, " ms", value, "Time for the ringing body to fall by 40 dB.");
+    const drive = value => control("drive", "Drive", 0, 18, 0.1, " dB", value, "Soft saturation amount. Zero bypasses it.");
+    const sweepDepth = value => control("sweep", "Sweep depth", 0, 12, 1, " st", value, "Pitch offset at the start of the hit.");
+    const sweepTime = value => control("sweepTime", "Sweep time", 1, 85, 1, " ms", value, "Time for the pitch offset to fall to 1%.");
+
+    function wireControls(tone, duration, delay) {
+      return [
+        control("wireTone", "Wire brightness", 800, 7800, 10, " Hz", tone, "Moves the wire noise band up or down."),
+        control("wireDecay", "Wire decay", 20, 750, 1, " ms", duration, "Time for the wire noise to fall by 40 dB."),
+        control("wireDelay", "Wire delay", 0, 24, 0.1, " ms", delay, "Time between the start of the hit and the wires."),
+      ];
+    }
+
+    const bodyVoices = ["sweepBody", "resonatorBody", "modalBody"];
+    const engines = {
+      sweepBody: {
+        name: "Pitch Sweep Body", short: "Swept sine", render: pitchSweepBody,
+        description: "A falling sine pitch for a rounded electronic body, with an optional onset click.",
+        controls: [tune(195, "Pitch once the sweep settles."), bodyDecay(110), sweepDepth(5), sweepTime(18),
+          control("sweepCurve", "Sweep curve", -100, 100, 1, "%", 0, "Negative drops pitch sooner. Positive holds the starting pitch longer."),
+          control("click", "Click level", 0, 100, 1, "%", 0, "Amount of filtered noise at the onset."),
+          control("clickTone", "Click tone", 1100, 10000, 10, " Hz", 5500, "Upper cutoff of the click noise."),
+          control("clickDecay", "Click decay", 1, 45, 0.1, " ms", 6, "Time for the click to fall by 40 dB."),
+          drive(1)],
+      },
+      resonatorBody: {
+        name: "Resonator Body", short: "Pulse-excited body", render: resonatorBody,
+        description: "A short strike excites a ringing head with adjustable pitch drift and tone.",
+        controls: [tune(205, "Pitch once the ring settles."), bodyDecay(155), sweepDepth(3), sweepTime(12),
+          control("drift", "Tail pitch drift", 0, 6, 0.1, " st", 0.6, "Additional, slower downward pitch movement."),
+          control("impact", "Excitation", 0, 100, 1, "%", 65, "Strength of the strike that sets the body ringing."),
+          control("exciterWidth", "Exciter width", 0.2, 1.5, 0.05, " ms", 0.5, "Duration of the bipolar strike pulse."),
+          control("tone", "Tone cutoff", 180, 8000, 10, " Hz", 2800, "Low-pass cutoff for the resonator body."),
+          drive(1)],
+      },
+      modalBody: {
+        name: "Modal Body", short: "Five ringing head modes", render: modalBody,
+        description: "Five damped head resonances with adjustable strike position and overtone decay.",
+        controls: [tune(185), bodyDecay(155),
+          control("resonance", "Upper modes", 0, 100, 1, "%", 62, "Level of the four upper resonances."),
+          control("damping", "Damping", 0, 100, 1, "%", 48, "How quickly the upper modes die away."),
+          control("strikePosition", "Strike position", 0, 100, 1, "%", 50, "Moves the strike from the center toward the edge and changes which modes ring."),
+          drive(1)],
+      },
+      wires: {
+        name: "Snare Wires", short: "Filtered noise layer", render: wireVoice,
+        description: "A separate noise layer for adding sizzle or lengthening the tail.",
+        controls: [...wireControls(3400, 260, 3), drive(0)],
+      },
+      sweepWires: {
+        name: "Noise Sweep Wires", short: "Sweeping noise with grain", render: noiseSweepWires,
+        description: "A wide noise band sweeps from a bright strike into a darker, dusty wire tail.",
+        controls: [...wireControls(3200, 250, 3),
+          control("focus", "Filter Q", 0.5, 2.5, 0.05, "", 0.95, "Higher values narrow the wire noise band and make it ring more."),
+          control("grain", "Grain", 0, 100, 1, "%", 84, "Depth of fast amplitude modulation on the wire noise."),
+          drive(0)],
+      },
+      rim: {
+        name: "Rim Shot", short: "Rim tones + noise click", render: rimShot,
+        description: "Two short rim tones and a sharp click for adding definition at the front of a hit.",
+        controls: [
+          control("rimPitch", "Rim pitch", 400, 3000, 1, " Hz", 1060, "Pitch of the lower rim resonance."),
+          control("bodyDecay", "Rim decay", 8, 130, 1, " ms", 36, "Time for the rim tones to fall by 40 dB."),
+          control("clickTone", "Click brightness", 2600, 14000, 10, " Hz", 9000, "Upper cutoff of the transient noise."),
+          control("clickDecay", "Click decay", 3, 60, 1, " ms", 14, "Time for the click to fall by 40 dB."),
+          drive(2),
+        ],
+      },
+    };
+
+    function renderVoice(engine, patch, layerId) {
+      const clickDecay = patch.click === 0 ? 0 : patch.clickDecay ?? 0;
+      const longestDecay = Math.max(patch.bodyDecay ?? 0, patch.wireDecay ?? 0, clickDecay);
+      const duration = (longestDecay * 1.5 + (patch.wireDelay ?? 0) + 5) / 1000;
+      const samples = new Float32Array(Math.ceil(rate * duration));
+      const voice = engine.render(patch, whiteNoise(layerId));
+      const boost = gain(patch.drive);
+      for (let i = 0; i < samples.length; i++) {
+        const time = i / rate;
+        const raw = voice(time);
+        const shaped = patch.drive > 0
+          ? raw + (Math.tanh(raw * boost) - raw) * Math.min(1, patch.drive / 5)
+          : raw;
+        const fade = Math.min(1, (samples.length - 1 - i) / 240);
+        samples[i] = shaped * fade;
+      }
+      return { samples };
+    }
+
+    function mixLayers(layers, masterGainDb) {
+      const length = layers.reduce((longest, layer) => Math.max(longest, layer.voice.samples.length), 1);
+      const samples = new Float32Array(length);
+      for (const { voice, level } of layers) {
+        const weight = level / 100;
+        for (let i = 0; i < voice.samples.length; i++) samples[i] += voice.samples[i] * weight;
+      }
+      const master = gain(masterGainDb);
+      let peak = 0;
+      for (let i = 0; i < length; i++) {
+        samples[i] *= master;
+        peak = Math.max(peak, Math.abs(samples[i]));
+      }
+      const trim = peak > 1 ? 1 / peak : 1;
+      if (trim < 1) {
+        for (let i = 0; i < length; i++) samples[i] *= trim;
+      }
+      return { samples, peak: peak * trim, trim };
+    }
+
+    function trimWaveTail({ samples, peak }) {
+      // Keep quieter mixes proportionally longer, down to the PCM rounding floor.
+      const threshold = Math.max(0.5 / 32768, Math.min(gain(-60), peak * gain(-50)));
+      let last = samples.length - 1;
+      while (last >= 0 && Math.abs(samples[last]) < threshold) last--;
+      if (last < 0) return new Float32Array(1);
+
+      const fadeFrames = Math.round(rate * 0.005);
+      const length = Math.min(samples.length, last + 1 + fadeFrames);
+      if (length === samples.length) return samples;
+
+      const trimmed = samples.slice(0, length);
+      for (let i = 1; i <= fadeFrames; i++) trimmed[last + i] *= 1 - i / fadeFrames;
+      return trimmed;
+    }
+
+    function defaultWaveName(date = new Date()) {
+      const pad = number => String(number).padStart(2, "0");
+      const day = [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("-");
+      const time = [date.getHours(), date.getMinutes(), date.getSeconds()].map(pad).join("-");
+      return "snare-" + day + "_" + time + ".wav";
+    }
+
+    function waveFile(samples) {
+      const data = new DataView(new ArrayBuffer(44 + samples.length * 2));
+      function tag(offset, name) {
+        for (let i = 0; i < name.length; i++) data.setUint8(offset + i, name.charCodeAt(i));
+      }
+      tag(0, "RIFF");
+      data.setUint32(4, data.byteLength - 8, true);
+      tag(8, "WAVE");
+      tag(12, "fmt ");
+      data.setUint32(16, 16, true);
+      data.setUint16(20, 1, true);
+      data.setUint16(22, 1, true);
+      data.setUint32(24, rate, true);
+      data.setUint32(28, rate * 2, true);
+      data.setUint16(32, 2, true);
+      data.setUint16(34, 16, true);
+      tag(36, "data");
+      data.setUint32(40, samples.length * 2, true);
+      samples.forEach((sample, i) => {
+        data.setInt16(44 + i * 2, Math.round(sample * (sample < 0 ? 32768 : 32767)), true);
+      });
+      return new Blob([data], { type: "audio/wav" });
+    }
+
+    const $ = id => document.getElementById(id);
+    const defaults = engine => Object.fromEntries(engine.controls.map(spec => [spec.key, spec.initial]));
+    const defaultMasterGainDb = -7;
+    const validGain = value => Number.isFinite(value) && value >= -30 && value <= 0;
+    const storageKey = "snare-lab-cards-v1";
+    const storageVersion = 2;
+    const maxLayerLevel = 100;
+    const createLayer = (id, model) => ({
+      id, model, level: maxLayerLevel, muted: false, solo: false, settings: defaults(engines[model]),
+    });
+    let layers = [createLayer(1, "modalBody"), { ...createLayer(2, "wires"), level: 75 }];
+    let selectedId = 1;
+    let nextLayerId = 3;
+    let tempo = 120;
+    let masterGainDb = defaultMasterGainDb;
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey));
+      if (validGain(saved?.masterGainDb)) masterGainDb = saved.masterGainDb;
+      if (Number.isInteger(saved?.tempo) && saved.tempo >= 40 && saved.tempo <= 220) tempo = saved.tempo;
+      if (Array.isArray(saved?.layers)) {
+        const rescaleGrain = (saved.version ?? 1) < 2;
+        const ids = new Set();
+        layers = [];
+        for (const item of saved.layers) {
+          if (!item || !Object.hasOwn(engines, item.model) ||
+            !Number.isSafeInteger(item.id) || item.id < 1 || ids.has(item.id)) continue;
+          const { model } = item;
+          const layer = createLayer(item.id, model);
+          if (Number.isFinite(item.level) && item.level >= 0 && item.level <= maxLayerLevel) layer.level = item.level;
+          layer.solo = item.solo === true;
+          layer.muted = !layer.solo && item.muted === true;
+          for (const spec of engines[model].controls) {
+            const value = item.settings?.[spec.key];
+            if (Number.isFinite(value) && value >= spec.min && value <= spec.max &&
+              (!spec.options || Number.isInteger(value))) layer.settings[spec.key] = value;
+          }
+          const savedGrain = item.settings?.grain;
+          if (rescaleGrain && model === "sweepWires" && Number.isFinite(savedGrain) && savedGrain >= 0 && savedGrain <= 100) {
+            layer.settings.grain = Math.min(100, savedGrain * 2);
+          }
+          ids.add(layer.id);
+          layers.push(layer);
+          nextLayerId = Math.max(nextLayerId, layer.id + 1);
+        }
+        if (Number.isSafeInteger(saved.nextLayerId)) nextLayerId = Math.max(nextLayerId, saved.nextLayerId);
+        selectedId = ids.has(saved.selectedId) ? saved.selectedId : layers[0]?.id ?? null;
+      }
+    } catch {
+      $("storage-note").textContent = "Your layers are saved for this session.";
+    }
+
+    function save() {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ version: storageVersion, layers, selectedId, nextLayerId, tempo, masterGainDb }));
+      } catch {
+        $("storage-note").textContent = "Your layers are saved for this session.";
+      }
+    }
+
+    function downloadFile(blob, name) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    const renderedLayers = new Map();
+    let rendered = null;
+    let frame = 0;
+    function isIncluded(layer, soloActive = layers.some(candidate => candidate.solo)) {
+      return soloActive ? layer.solo : !layer.muted;
+    }
+
+    const isAudible = layer => layer.level > 0 && isIncluded(layer);
+
+    function currentMix() {
+      if (!rendered) {
+        const soloActive = layers.some(layer => layer.solo);
+        const included = layers.filter(layer => layer.level > 0 && isIncluded(layer, soloActive));
+        const active = included.map(({ id, model, settings, level }) => {
+          if (!renderedLayers.has(id)) renderedLayers.set(id, renderVoice(engines[model], settings, id));
+          return { voice: renderedLayers.get(id), level };
+        });
+        rendered = mixLayers(active, masterGainDb);
+      }
+      return rendered;
+    }
+
+    function invalidateMix() {
+      rendered = null;
+      scheduleDraw();
+    }
+
+    function invalidateLayer(layer) {
+      renderedLayers.delete(layer.id);
+      if (isAudible(layer)) invalidateMix();
+    }
+
+    function scheduleDraw() {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        draw();
+      });
+    }
+
+    function draw() {
+      const { samples, peak, trim } = currentMix();
+      const canvas = $("scope");
+      const bounds = canvas.getBoundingClientRect();
+      const width = Math.max(1, Math.round(bounds.width));
+      const height = Math.max(1, Math.round(bounds.height));
+      const scale = devicePixelRatio || 1;
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const context = canvas.getContext("2d");
+      context.scale(scale, scale);
+      const center = height / 2;
+      const plotMs = Math.max(100, Math.ceil(samples.length * 1000 / rate / 100) * 100);
+      const plotSamples = plotMs * rate / 1000;
+      context.strokeStyle = "#293634";
+      context.beginPath();
+      for (let i = 1; i < 8; i++) {
+        const x = Math.round(i * width / 8) + 0.5;
+        context.moveTo(x, 0);
+        context.lineTo(x, height);
+      }
+      for (const fraction of [0.25, 0.5, 0.75]) {
+        const y = Math.round(height * fraction) + 0.5;
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+      }
+      context.stroke();
+      context.strokeStyle = "#77d7c0";
+      context.beginPath();
+      for (let x = 0; x < width; x++) {
+        const start = Math.floor(x * plotSamples / width);
+        const end = Math.min(samples.length, Math.floor((x + 1) * plotSamples / width));
+        let lo = samples[start] ?? 0;
+        let hi = lo;
+        for (let i = start + 1; i < end; i++) {
+          lo = Math.min(lo, samples[i]);
+          hi = Math.max(hi, samples[i]);
+        }
+        const top = center - hi * (center - 7);
+        const bottom = center - lo * (center - 7);
+        context.moveTo(x + 0.5, top);
+        context.lineTo(x + 0.5, Math.max(top + 1, bottom));
+      }
+      context.stroke();
+      const peakLabel = peak > 0 ? (20 * Math.log10(peak)).toFixed(1) + " dBFS" : "−∞ dBFS";
+      $("metrics").textContent = "Peak " + peakLabel;
+      $("metrics").title = trim < 1 ? "Clipping prevention applied " + (20 * Math.log10(trim)).toFixed(1) + " dB of mix trim." : "";
+      $("scope-mid").textContent = plotMs / 2 + " ms";
+      $("scope-end").textContent = plotMs + " ms";
+      canvas.setAttribute("aria-label", "Mix waveform, 0 to " + plotMs + " milliseconds, peak " + peakLabel);
+    }
+
+    const removeDialog = $("remove-dialog");
+    let removalCandidate = null;
+
+    removeDialog.addEventListener("close", () => {
+      const layer = removalCandidate;
+      removalCandidate = null;
+      if (layer && removeDialog.returnValue === "remove") removeLayer(layer);
+    });
+
+    function renderLayer(layer) {
+      const engine = engines[layer.model];
+      const row = document.createElement("div");
+      row.className = "layer-entry";
+      row.id = "layer-" + layer.id;
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = "layer-select";
+      select.id = "layer-select-" + layer.id;
+      select.setAttribute("aria-controls", "parameters");
+      select.title = engine.name + " · " + engine.short;
+      select.textContent = engine.name;
+      select.addEventListener("click", () => {
+        select.focus();
+        selectLayer(layer.id);
+      });
+      select.addEventListener("keydown", event => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const next = layers[layers.indexOf(layer) + (event.key === "ArrowDown" ? 1 : -1)];
+        event.preventDefault();
+        if (!next) return;
+        selectLayer(next.id);
+        $("layer-select-" + next.id).focus();
+      });
+      const actions = document.createElement("div");
+      actions.className = "layer-actions";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove-layer";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", "Remove " + engine.name);
+      remove.title = "Remove layer";
+      remove.addEventListener("click", () => requestLayerRemoval(layer));
+      const field = document.createElement("div");
+      field.className = "mix-control";
+      const label = document.createElement("label");
+      const slider = document.createElement("input");
+      const value = document.createElement("output");
+      const solo = document.createElement("button");
+      solo.type = "button";
+      solo.className = "solo-layer";
+      solo.textContent = "S";
+      solo.setAttribute("aria-label", "Solo " + engine.name);
+      const mute = document.createElement("button");
+      mute.type = "button";
+      mute.className = "mute-layer";
+      mute.textContent = "M";
+      mute.setAttribute("aria-label", "Mute " + engine.name);
+      actions.append(solo, mute);
+      slider.id = "mix-" + layer.id;
+      slider.className = "slider";
+      slider.type = "range";
+      slider.min = 0;
+      slider.max = maxLayerLevel;
+      slider.step = 1;
+      slider.value = layer.level;
+      slider.setAttribute("aria-label", engine.name + " mix");
+      label.htmlFor = slider.id;
+      label.textContent = "Mix";
+      value.htmlFor = slider.id;
+      function showMixControls() {
+        value.textContent = layer.level + "%";
+        slider.setAttribute("aria-valuetext", value.textContent + (layer.muted ? " (muted)" : ""));
+        mute.setAttribute("aria-pressed", layer.muted);
+        mute.title = layer.muted ? "Unmute layer" : "Mute layer";
+        solo.setAttribute("aria-pressed", layer.solo);
+        solo.title = layer.solo ? "Clear solo" : "Solo layer";
+        row.classList.toggle("is-muted", layer.muted);
+      }
+      showMixControls();
+      function toggleMixState(state, other) {
+        layer[state] = !layer[state];
+        if (layer[state]) layer[other] = false;
+        showMixControls();
+        invalidateMix();
+        save();
+      }
+      solo.addEventListener("click", () => toggleMixState("solo", "muted"));
+      mute.addEventListener("click", () => toggleMixState("muted", "solo"));
+      slider.addEventListener("input", () => {
+        layer.level = Number(slider.value);
+        showMixControls();
+        if (isIncluded(layer)) invalidateMix();
+      });
+      slider.addEventListener("change", save);
+      field.append(label, slider, value);
+      const randomize = document.createElement("button");
+      randomize.type = "button";
+      randomize.className = "layer-randomize";
+      randomize.setAttribute("aria-label", "Randomize " + engine.name);
+      randomize.title = "Randomize " + engine.name;
+      const dice = document.createElement("span");
+      dice.className = "dice-icon";
+      dice.setAttribute("aria-hidden", "true");
+      randomize.append(dice);
+      randomize.addEventListener("click", () => randomizeLayer(layer));
+      row.append(remove, select, actions, field, randomize);
+      return row;
+    }
+
+    function selectLayer(id) {
+      if (selectedId === id) return;
+      selectedId = id;
+      syncSelection();
+      save();
+    }
+
+    function syncSelection() {
+      $("stack-empty").hidden = layers.length > 0;
+      for (const layer of layers) {
+        const selected = layer.id === selectedId;
+        $("layer-" + layer.id).classList.toggle("is-selected", selected);
+        $("layer-select-" + layer.id).setAttribute("aria-pressed", selected);
+      }
+      const selected = layers.find(layer => layer.id === selectedId);
+      $("parameter-title").textContent = selected ? engines[selected.model].name : "Parameters";
+      $("parameter-description").textContent = selected ? engines[selected.model].description : "Add a layer to edit its parameters.";
+      displayControls(selected);
+    }
+
+    function addLayer(model) {
+      const layer = createLayer(nextLayerId++, model);
+      layers.push(layer);
+      selectedId = layer.id;
+      invalidateMix();
+      $("layers").append(renderLayer(layer));
+      syncSelection();
+      save();
+    }
+
+    function generateRandomLayers() {
+      const model = bodyVoices[Math.floor(Math.random() * bodyVoices.length)];
+      const body = createLayer(nextLayerId++, model);
+      const wireModel = Math.random() < 0.5 ? "wires" : "sweepWires";
+      const wires = createLayer(nextLayerId++, wireModel);
+      wires.level = 55 + Math.floor(Math.random() * 31);
+      layers = [body, wires];
+      if (Math.random() < 0.5) {
+        const rim = createLayer(nextLayerId++, "rim");
+        rim.level = 15 + Math.floor(Math.random() * 31);
+        layers.push(rim);
+      }
+      layers.forEach(randomizeSettings);
+      selectedId = layers[0].id;
+      renderedLayers.clear();
+      invalidateMix();
+      $("layers").replaceChildren(...layers.map(renderLayer));
+      syncSelection();
+      save();
+    }
+
+    const modelDialog = $("model-dialog");
+    for (const [model, engine] of Object.entries(engines)) {
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.className = "model-choice";
+      const name = document.createElement("strong");
+      name.id = "model-choice-" + model;
+      name.textContent = engine.name;
+      const description = document.createElement("span");
+      description.id = name.id + "-description";
+      description.textContent = engine.description;
+      choice.setAttribute("aria-labelledby", name.id);
+      choice.setAttribute("aria-describedby", description.id);
+      choice.append(name, description);
+      choice.addEventListener("click", () => {
+        addLayer(model);
+        modelDialog.close();
+      });
+      $("model-choices").append(choice);
+    }
+    $("feeling-lucky").addEventListener("click", () => {
+      generateRandomLayers();
+      if (loopTimer === null) void trigger();
+    });
+    $("add-layer").addEventListener("click", () => modelDialog.showModal());
+    $("model-cancel").addEventListener("click", () => modelDialog.close());
+
+    function requestLayerRemoval(layer) {
+      if (removalCandidate) return;
+      removalCandidate = layer;
+      $("remove-description").textContent = engines[layer.model].name;
+      removeDialog.returnValue = "";
+      removeDialog.showModal();
+    }
+
+    function removeLayer(layer) {
+      const index = layers.indexOf(layer);
+      if (index === -1) return;
+      layers.splice(index, 1);
+      renderedLayers.delete(layer.id);
+      invalidateMix();
+      $("layer-" + layer.id).remove();
+      const neighbor = layers[index] ?? layers[index - 1];
+      if (selectedId === layer.id) selectedId = neighbor?.id ?? null;
+      syncSelection();
+      save();
+      (selectedId === null ? $("add-layer") : $("layer-select-" + selectedId)).focus();
+    }
+
+    function displayControls(layer) {
+      const container = $("parameters");
+      container.replaceChildren();
+      if (!layer) return;
+      for (const spec of engines[layer.model].controls) {
+        const field = document.createElement("div");
+        field.className = "parameter";
+        const row = document.createElement("div");
+        row.className = "row";
+        const label = document.createElement("label");
+        const input = document.createElement(spec.options ? "select" : "input");
+        const value = document.createElement("output");
+        input.id = "param-" + layer.id + "-" + spec.key;
+        if (spec.options) {
+          input.append(...spec.options.map((name, index) => new Option(name, index)));
+        } else {
+          input.className = "slider";
+          input.type = "range";
+          input.min = spec.min;
+          input.max = spec.max;
+          input.step = spec.step;
+        }
+        input.value = layer.settings[spec.key];
+        input.title = spec.tip;
+        label.htmlFor = input.id;
+        label.textContent = spec.label;
+        value.htmlFor = input.id;
+        function showValue() {
+          if (spec.options) return;
+          const formatted = Number(input.value).toLocaleString(undefined, { maximumFractionDigits: 2 }) + spec.unit;
+          value.textContent = formatted;
+          input.setAttribute("aria-valuetext", formatted);
+        }
+        showValue();
+        input.addEventListener("input", () => {
+          layer.settings[spec.key] = Number(input.value);
+          showValue();
+          invalidateLayer(layer);
+        });
+        input.addEventListener("change", save);
+        row.append(label);
+        if (!spec.options) row.append(value);
+        field.append(row, input);
+        container.append(field);
+      }
+    }
+
+    function randomizeSettings(layer) {
+      for (const { key, min, max, step, initial } of engines[layer.model].controls) {
+        // Pull random patches toward the tuned defaults, especially decay and drive.
+        const value = 0.6 * initial + 0.4 * (min + Math.random() * (max - min));
+        const quantized = min + Math.round((value - min) / step) * step;
+        layer.settings[key] = Number(quantized.toFixed(2));
+      }
+    }
+
+    function randomizeLayer(layer) {
+      randomizeSettings(layer);
+      invalidateLayer(layer);
+      if (layer.id === selectedId) displayControls(layer);
+      save();
+      if (loopTimer === null && isAudible(layer)) void trigger();
+    }
+    const exportDialog = $("export-dialog");
+    const exportName = $("export-name");
+    $("export").addEventListener("click", () => {
+      exportName.setCustomValidity("");
+      exportName.value = defaultWaveName();
+      exportDialog.showModal();
+      exportName.setSelectionRange(0, exportName.value.length - 4);
+    });
+    exportName.addEventListener("input", () => exportName.setCustomValidity(""));
+    $("export-cancel").addEventListener("click", () => exportDialog.close());
+    $("export-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const name = exportName.value.trim();
+      if (!name || /[<>:"/\\|?*\x00-\x1f]/.test(name)) {
+        exportName.setCustomValidity("Enter a file name without slashes or other reserved characters.");
+        exportName.reportValidity();
+        return;
+      }
+      const filename = /\.wav$/i.test(name) ? name : name + ".wav";
+      downloadFile(waveFile(trimWaveTail(currentMix())), filename);
+      exportDialog.close();
+    });
+
+    let audio;
+    let limiter;
+    let audioBuffer;
+    let bufferedMix;
+    let previousVoice;
+    let loopTimer = null;
+    let loopStarting = false;
+    let nextTime = 0;
+    const queued = new Set();
+
+    async function enableAudio() {
+      if (!audio) {
+        const Context = window.AudioContext || window.webkitAudioContext;
+        if (!Context) throw new Error("Web Audio is unavailable");
+        audio = new Context();
+        limiter = audio.createDynamicsCompressor();
+        limiter.threshold.value = -1;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.003;
+        limiter.connect(audio.destination);
+      }
+      if (audio.state !== "running") await audio.resume();
+      if (audio.state !== "running") throw new Error("Audio is suspended");
+      $("status").textContent = "Audio enabled";
+    }
+
+    function playAt(time) {
+      const mix = currentMix();
+      if (bufferedMix !== mix) {
+        audioBuffer = audio.createBuffer(1, mix.samples.length, rate);
+        audioBuffer.copyToChannel(mix.samples, 0);
+        bufferedMix = mix;
+      }
+      const source = audio.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(limiter);
+      const voice = { source, time };
+      source.onended = () => {
+        queued.delete(voice);
+        source.disconnect();
+        if (previousVoice === voice) previousVoice = undefined;
+      };
+      source.start(time);
+      return voice;
+    }
+
+    async function trigger() {
+      try {
+        await enableAudio();
+        if (previousVoice) {
+          const now = audio.currentTime;
+          if (now - previousVoice.time < 0.014) return;
+        }
+        previousVoice = playAt(audio.currentTime);
+      } catch {
+        $("status").textContent = "Audio unavailable. Try triggering again.";
+      }
+    }
+
+    function scheduleBeat() {
+      const now = audio.currentTime;
+      if (nextTime < now) nextTime = now + 0.005;
+      if (nextTime > now + 0.07) return;
+      queued.add(playAt(nextTime));
+      nextTime += 60 / tempo;
+    }
+
+    function stopLoop() {
+      clearInterval(loopTimer);
+      loopTimer = null;
+      for (const voice of queued) {
+        if (voice.time > audio.currentTime) voice.source.stop();
+      }
+      $("loop").textContent = "Start loop";
+      $("loop").setAttribute("aria-pressed", false);
+      $("loop").classList.remove("loop-on");
+    }
+
+    $("loop").addEventListener("click", async () => {
+      if (loopTimer !== null) return stopLoop();
+      if (loopStarting) return;
+      loopStarting = true;
+      try {
+        await enableAudio();
+        nextTime = audio.currentTime + 0.015;
+        scheduleBeat();
+        loopTimer = setInterval(scheduleBeat, 24);
+        $("loop").textContent = "Stop loop";
+        $("loop").setAttribute("aria-pressed", true);
+        $("loop").classList.add("loop-on");
+      } catch {
+        $("status").textContent = "Audio unavailable. Try starting the loop again.";
+      } finally {
+        loopStarting = false;
+      }
+    });
+    $("tempo").value = tempo;
+    $("tempo-value").textContent = tempo + " BPM";
+    $("tempo").addEventListener("input", event => {
+      tempo = Number(event.target.value);
+      $("tempo-value").textContent = tempo + " BPM";
+    });
+    $("tempo").addEventListener("change", save);
+    $("output-gain").value = masterGainDb;
+    $("output-gain-value").textContent = masterGainDb + " dB";
+    $("output-gain").addEventListener("input", event => {
+      masterGainDb = Number(event.target.value);
+      $("output-gain-value").textContent = masterGainDb + " dB";
+      invalidateMix();
+    });
+    $("output-gain").addEventListener("change", save);
+    $("trigger").addEventListener("click", trigger);
+    window.addEventListener("keydown", event => {
+      if (event.code !== "Space" || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.target.closest("button, select, input, textarea, a, [contenteditable]")) return;
+      event.preventDefault();
+      void trigger();
+    });
+    new ResizeObserver(scheduleDraw).observe($("scope"));
+    for (const layer of layers) $("layers").append(renderLayer(layer));
+    syncSelection();
+    scheduleDraw();
+  </script>
+</body>
+</html>
