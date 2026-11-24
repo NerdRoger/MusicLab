@@ -199,7 +199,7 @@
         <div class="form" id="parameters"></div>
       </section>
     </div>
-    <div class="footer"><span id="storage-note">Your layers are saved in this browser.</span><span>Mono · 48 kHz · Decay measured to −40 dB</span></div>
+    <div class="footer"><span id="storage-note">Your layers are saved in this browser.</span><span>Mono · 48 kHz</span></div>
   </main>
   <dialog class="card dialog-card model-picker" id="model-dialog" aria-labelledby="model-dialog-title">
     <div class="row model-picker-head">
@@ -235,12 +235,16 @@
     const turn = 2 * Math.PI;
     const decay = (seconds, ms) => Math.exp(-Math.LN10 * 2 * seconds / (ms * 0.001));
     const gain = db => 10 ** (db / 20);
-    const attack = t => Math.min(1, t / 0.0007);
+    const attack = (t, duration = 0.0007) => Math.min(1, t / duration);
     const sweptPitch = (t, p) => p.tune * 2 ** (p.sweep / 12 * decay(t, p.sweepTime));
 
     function whiteNoise(layerId) {
       // Repeatable for A/B comparisons, with an independent stream per layer.
-      let seed = Math.imul(layerId, 0x56d62e11) || 1;
+      return seededNoise(Math.imul(layerId, 0x56d62e11));
+    }
+
+    function seededNoise(seed) {
+      seed ||= 1;
       return () => {
         seed ^= seed << 13;
         seed ^= seed >>> 17;
@@ -267,8 +271,9 @@
       const click = p.click > 0 ? noiseBand(nextNoise, 900, p.clickTone) : null;
       const curvature = 2 ** (p.sweepCurve / 50);
       const duration = p.sweepTime / 1000;
+      const hold = p.bodyHold / 1000;
       return t => {
-        const body = 0.7 * Math.sin(phase) * decay(t, p.bodyDecay);
+        const body = 0.7 * Math.sin(phase) * decay(Math.max(0, t - hold), p.bodyDecay);
         const sweepPosition = p.sweepCurve === 0 ? t : duration * (t / duration) ** curvature;
         phase += turn * sweptPitch(sweepPosition, p) / rate;
         const transient = click ? click() * decay(t, p.clickDecay) * p.click / 100 : 0;
@@ -282,6 +287,7 @@
       let imaginary = 0;
       let filtered = 0;
       const damping = decay(1 / rate, p.bodyDecay);
+      const hold = p.bodyHold / 1000;
       const tone = 1 - Math.exp(-turn * p.tone / rate);
       const pulseWidth = p.exciterWidth / 1000;
       const pulseGain = p.impact / 100 * Math.min(1, 0.0005 / pulseWidth);
@@ -292,8 +298,9 @@
         const sine = Math.sin(angle);
         const pulse = t < pulseWidth ? Math.sin(turn * t / pulseWidth) * pulseGain : 0;
         const previous = real;
-        real = damping * (real * cosine - imaginary * sine);
-        imaginary = damping * (imaginary * cosine + previous * sine + pulse);
+        const loss = t < hold ? 1 : damping;
+        real = loss * (real * cosine - imaginary * sine);
+        imaginary = loss * (imaginary * cosine + previous * sine + pulse);
         filtered += tone * (real * 1.5 + pulse * 0.32 - filtered);
         return 0.3 * filtered;
       };
@@ -308,6 +315,7 @@
         { ratio: 3.60, level: 0.12, length: 0.17, edgeWeight: 0.8 },
       ];
       const position = (p.strikePosition - 50) / 50;
+      const hold = p.bodyHold / 1000;
       const partials = modes.map((mode, index) => {
         const length = index === 0 ? p.bodyDecay : p.bodyDecay * mode.length / (0.5 + p.damping / 55);
         const level = index === 0 ? mode.level : mode.level * p.resonance / 100;
@@ -315,8 +323,9 @@
       });
       return t => {
         let sample = 0;
+        const decayAge = Math.max(0, t - hold);
         for (const mode of partials) {
-          sample += Math.sin(mode.angle * t) * decay(t, mode.length) * mode.level;
+          sample += Math.sin(mode.angle * t) * decay(decayAge, mode.length) * mode.level;
         }
         return 0.8 * attack(t) * sample;
       };
@@ -325,11 +334,12 @@
     function wireVoice(p, nextNoise) {
       const band = noiseBand(nextNoise, p.wireTone / 3, p.wireTone * 2);
       const delay = p.wireDelay / 1000;
+      const rise = p.wireAttack / 1000;
       return t => {
         const noise = band();
         const age = t - delay;
         if (age <= 0) return 0;
-        return noise * attack(age) * decay(age, p.wireDecay);
+        return noise * attack(age, rise) * decay(age, p.wireDecay);
       };
     }
 
@@ -337,6 +347,7 @@
       let bandState = 0;
       let lowState = 0;
       const delay = p.wireDelay / 1000;
+      const rise = p.wireAttack / 1000;
       const grain = 0.425 * p.grain / 100;
       const sweepTimeMs = 62;
       const sweepOctaves = 7 / 12;
@@ -359,22 +370,177 @@
 
         const compensation = 0.55 * Math.sqrt(rate / (frequency * focus));
         const texture = 1 + grain * Math.sin(turn * 73 * age);
-        return band * compensation * texture * attack(age) * decay(age, p.wireDecay);
+        return band * compensation * texture * attack(age, rise) * decay(age, p.wireDecay);
       };
     }
 
-    function rimShot(p, nextNoise) {
-      const click = noiseBand(nextNoise, 1200, p.clickTone);
-      return t => attack(t) * (
-        0.28 * Math.sin(turn * p.rimPitch * t) * decay(t, p.bodyDecay) +
-        0.16 * Math.sin(turn * p.rimPitch * 1.67 * t) * decay(t, p.bodyDecay * 0.55) +
-        0.63 * click() * decay(t, p.clickDecay)
-      );
+    function smoothStep(value) {
+      const x = Math.max(0, Math.min(1, value));
+      return x * x * (3 - 2 * x);
+    }
+
+    function bandPass(hz, q) {
+      const angle = turn * hz / rate;
+      const alpha = Math.sin(angle) / (2 * q);
+      const normalization = 1 / (1 + alpha);
+      const feed = alpha * normalization;
+      const feedback1 = 2 * Math.cos(angle) * normalization;
+      const feedback2 = (alpha - 1) * normalization;
+      let first = 0;
+      let second = 0;
+      return input => {
+        const output = input * feed + first;
+        first = feedback1 * output + second;
+        second = -input * feed + feedback2 * output;
+        return output;
+      };
+    }
+
+    function renderTwoStageBody(p) {
+      const lengthScale = p.bodyLength / 100;
+      const hold = 16.71900435100865 + (p.bodyHold - 16.7);
+      const knee = hold + (46.017268059650874 - 16.71900435100865) * lengthScale;
+      const gentleDecay = 0.14963673504850972 / lengthScale;
+      const steepDecay = 0.027775207403946987 / lengthScale ** 2;
+      const handoff = 10.675567979748228 + (p.handoff - 10.7);
+      const headPitch = 173.8620784079911 + (p.tune - 174);
+      const strikePitch = 484.7178233508952 + (p.strikePitch - 485);
+      const samples = new Float64Array(Math.round((hold + 270 * lengthScale) * rate / 1000));
+      let strikePhase = 1.5;
+      let bodyPhase = 1.5;
+      const drive = 1.4;
+      const normalization = Math.tanh(drive);
+      for (let i = 0; i < samples.length; i++) {
+        const ms = i / (rate / 1000);
+        const bend = 67 * Math.exp(-Math.max(0, ms - 7.299682357913506 - 7.100979060606484) / 14.611749557171436);
+        const upperPitch = strikePitch + (37.10591443326283 * 0.22) * Math.exp(-ms / 4);
+        strikePhase += turn * upperPitch / rate;
+        bodyPhase += turn * (headPitch + bend) / rate;
+        const blend = smoothStep((ms - 6.5153769459667625) / handoff);
+        const tone = (1 - blend) * Math.sin(strikePhase) + blend * Math.sin(bodyPhase);
+        const rise = smoothStep((ms - 4.203468280837754) / 5.35853262471996);
+        const fall = gain(-gentleDecay * Math.max(0, ms - hold) - steepDecay * Math.max(0, ms - knee) ** 2);
+        samples[i] = Math.tanh(drive * tone) / normalization * (rise * fall);
+      }
+      return { samples, punch: 1 };
+    }
+
+    function renderRimShot(p, layerId) {
+      const contour = p.contour / 100;
+      const bend = p.rimBend / 100;
+      const focus = p.clickFocus / 100;
+      const toneLength = p.bodyDecay / 16;
+      const pitchScale = p.rimPitch / 979;
+      const blend = (a, b, amount) => a * (1 - amount) + b * amount;
+      const lowPitch = blend(p.rimPitch, 978.8693865061462 * pitchScale, contour);
+      const upperPitch = blend(p.rimPitch * 1.67, 1392.7303811379475 * pitchScale, contour);
+      const snapPitch = 1542.6723238145773 * pitchScale;
+      const lowLevel = blend(0.28, 0.3942595224277392, contour);
+      const upperLevel = blend(0.16, 0.3229563687368456, contour);
+      const snapLevel = 0.4572100081192254 * p.snapLevel / 100;
+      const clickLevel = p.clickLevel / 100;
+      const toneDuration = blend(p.bodyDecay * 1.5 + 5, 160 * toneLength, contour);
+      const duration = Math.max(toneDuration, p.clickDecay * 1.5 + 5) / 1000;
+      const sampleCount = Math.ceil(rate * duration);
+      const samples = contour > 0 ? new Float64Array(sampleCount) : new Float32Array(sampleCount);
+      const broadClick = focus < 1 ? noiseBand(whiteNoise(layerId), 1200, p.clickTone) : null;
+      const focusedNoise = focus > 0 ? seededNoise(0x57d4a4d8) : null;
+      const focusedClick = focus > 0 ? bandPass(p.clickTone, 1.5) : null;
+      const broadGain = 0.63 * Math.sqrt(1 - focus) * clickLevel;
+      const focusedGain = 0.32 * Math.sqrt(focus) * clickLevel;
+      const focusedDecay = 8 * (p.clickDecay / 36.8);
+      const boost = gain(p.drive);
+      const staticPitch = contour === 0 && bend === 0;
+      let lowPhase = contour * 0.25214174975236703 - (1 - contour) * turn * lowPitch / rate;
+      let upperPhase = contour * 0.9880595284271834 - (1 - contour) * turn * upperPitch / rate;
+      const crackEnd = 7.130046193404647;
+      for (let i = 0; i < samples.length; i++) {
+        const t = i / rate;
+        const timeMs = i / (rate / 1000);
+        const ms = timeMs / toneLength;
+        if (!staticPitch) {
+          lowPhase += turn * (lowPitch - bend * (37.10591443326283 * smoothStep(ms / 13)) * pitchScale) / rate;
+          upperPhase += turn * (upperPitch - bend * (110 * smoothStep(ms / 12)) * pitchScale) / rate;
+        }
+        const lowTone = Math.sin(staticPitch ? turn * p.rimPitch * t : lowPhase);
+        const upperTone = Math.sin(staticPitch ? turn * p.rimPitch * 1.67 * t : upperPhase);
+
+        const shapedLow = smoothStep(ms / 2.4044927255302997) *
+          gain(-10 * (ms / crackEnd) ** 2 - 0.2702409866633818 * ms) *
+          Math.exp(-Math.max(0, ms - crackEnd) / 5.926602706260786);
+        const shapedUpper = smoothStep(ms / 1.5) * Math.exp(-ms / 7.436961252143401);
+        const low = lowLevel * lowTone * blend(decay(t, p.bodyDecay), shapedLow, contour);
+        const upper = upperLevel * upperTone * blend(decay(t, p.bodyDecay * 0.55), shapedUpper, contour);
+        const broad = broadClick ? broadGain * broadClick() * decay(t, p.clickDecay) : 0;
+        const focused = focusedClick
+          ? focusedGain * smoothStep(timeMs / 0.4) * Math.exp(-timeMs / focusedDecay) * (2 * focusedClick(focusedNoise()))
+          : 0;
+        const snap = snapLevel * smoothStep(ms / 0.85) * Math.exp(-((ms / 5.3) ** 2)) *
+          Math.sin(turn * snapPitch * timeMs / 1000 + 0.9196460388054642);
+        const raw = blend(attack(t), 1, contour) * (low + upper + broad + focused + snap);
+        const fade = Math.min(1, (samples.length - 1 - i) / 240);
+        samples[i] = softDrive(raw, p.drive, boost) * fade;
+      }
+      return { samples, punch: contour };
+    }
+
+    function wireNoiseBands(seed) {
+      const random = seededNoise(seed);
+      const low = bandPass(1700, 2);
+      const mid = bandPass(2530, 1.4);
+      const high = bandPass(6300, 0.85);
+      const air = bandPass(10100, 1.4);
+      return (lowGain, midGain, highGain, airGain) => {
+        const first = random();
+        const second = random();
+        return lowGain * (low(first) * 3.8) + midGain * (mid(second) * 2.9) +
+          highGain * (high(first) * 1.55) + airGain * (air(second) * 1.4);
+      };
+    }
+
+    function renderResonantWires(p) {
+      const lengthScale = p.wireLength / 100;
+      const brightness = p.brightness / 100;
+      const delay = 18.616102569840102 + (p.wireDelay - 18.6);
+      const riseTime = 31.076788202514567 + (p.wireRise - 31.1);
+      const darkDecay = 144.9202191211964 * lengthScale;
+      const highDecay = 93.90853278264885 * lengthScale;
+      const airDecay = 35 * lengthScale;
+      const ringPitch = 1674.0396607311195 + (p.ringPitch - 1674);
+      const ringLevel = 0.02625 * p.ringLevel / 100;
+      const ringDecay = 172.79385656159238 * lengthScale;
+      const duration = p.wireDelay + (800 - 18.6) * lengthScale;
+      const samples = new Float64Array(Math.round(duration * rate / 1000));
+      const seed = Math.imul(p.seed, 0x56d62e11);
+      const noise = wireNoiseBands(0x1b546ba7 ^ seed);
+      for (let i = 0; i < samples.length; i++) {
+        const ms = i / (rate / 1000);
+        const age = ms - delay;
+        const elapsed = Math.max(0, age);
+        const low = 0.035 * Math.exp(-elapsed / darkDecay);
+        const mid = 0.4 * Math.exp(-elapsed / (darkDecay * 0.88));
+        const high = (0.5572707695329133 * brightness) * Math.exp(-elapsed / highDecay);
+        const air = (0.04 * brightness) * Math.exp(-elapsed / airDecay);
+        const wireNoise = noise(low, mid, high, air);
+        if (age <= 0) continue;
+        const rise = (1 - Math.exp(-age / riseTime)) ** 1.2152052593645444;
+        const ring = ringLevel * smoothStep(age / 45) * Math.exp(-age / ringDecay);
+        const fade = 1 - smoothStep((ms - (duration - 54)) / 54);
+        samples[i] = (rise * wireNoise + ring * Math.sin(turn * ringPitch * age / 1000 + 0.48)) * fade;
+      }
+      return { samples, keepTail: true };
+    }
+
+    function shapePunch(sample, ms) {
+      const emphasis = 1 + 0.096114798836022 * (1 - smoothStep((ms - 4) / 10));
+      const dry = sample * emphasis;
+      return dry / (1 + 0.24969611595433952 * dry ** 4) ** 0.25;
     }
 
     const control = (key, label, min, max, step, unit, initial, tip) =>
       ({ key, label, min, max, step, unit, initial, tip });
     const tune = (value, tip = "Lowest frequency of the drumhead.") => control("tune", "Head pitch", 110, 430, 1, " Hz", value, tip);
+    const bodyHold = control("bodyHold", "Body hold", 0, 40, 1, " ms", 0, "Time from the start of the hit before the body begins to decay.");
     const bodyDecay = value => control("bodyDecay", "Body decay", 25, 400, 1, " ms", value, "Time for the ringing body to fall by 40 dB.");
     const drive = value => control("drive", "Drive", 0, 18, 0.1, " dB", value, "Soft saturation amount. Zero bypasses it.");
     const sweepDepth = value => control("sweep", "Sweep depth", 0, 12, 1, " st", value, "Pitch offset at the start of the hit.");
@@ -385,15 +551,17 @@
         control("wireTone", "Wire brightness", 800, 7800, 10, " Hz", tone, "Moves the wire noise band up or down."),
         control("wireDecay", "Wire decay", 20, 750, 1, " ms", duration, "Time for the wire noise to fall by 40 dB."),
         control("wireDelay", "Wire delay", 0, 24, 0.1, " ms", delay, "Time between the start of the hit and the wires."),
+        control("wireAttack", "Wire attack", 0.1, 35, 0.1, " ms", 0.7, "Time for the wires to fade in after Wire delay."),
       ];
     }
 
-    const bodyVoices = ["sweepBody", "resonatorBody", "modalBody"];
+    const bodyVoices = ["sweepBody", "resonatorBody", "modalBody", "twoStageBody"];
+    const wireVoices = ["wires", "sweepWires", "resonantWires"];
     const engines = {
       sweepBody: {
         name: "Pitch Sweep Body", short: "Swept sine", render: pitchSweepBody,
         description: "A falling sine pitch for a rounded electronic body, with an optional onset click.",
-        controls: [tune(195, "Pitch once the sweep settles."), bodyDecay(110), sweepDepth(5), sweepTime(18),
+        controls: [tune(195, "Pitch once the sweep settles."), bodyHold, bodyDecay(110), sweepDepth(5), sweepTime(18),
           control("sweepCurve", "Sweep curve", -100, 100, 1, "%", 0, "Negative drops pitch sooner. Positive holds the starting pitch longer."),
           control("click", "Click level", 0, 100, 1, "%", 0, "Amount of filtered noise at the onset."),
           control("clickTone", "Click tone", 1100, 10000, 10, " Hz", 5500, "Upper cutoff of the click noise."),
@@ -403,7 +571,7 @@
       resonatorBody: {
         name: "Resonator Body", short: "Pulse-excited body", render: resonatorBody,
         description: "A short strike excites a ringing head with adjustable pitch drift and tone.",
-        controls: [tune(205, "Pitch once the ring settles."), bodyDecay(155), sweepDepth(3), sweepTime(12),
+        controls: [tune(205, "Pitch once the ring settles."), bodyHold, bodyDecay(155), sweepDepth(3), sweepTime(12),
           control("drift", "Tail pitch drift", 0, 6, 0.1, " st", 0.6, "Additional, slower downward pitch movement."),
           control("impact", "Excitation", 0, 100, 1, "%", 65, "Strength of the strike that sets the body ringing."),
           control("exciterWidth", "Exciter width", 0.2, 1.5, 0.05, " ms", 0.5, "Duration of the bipolar strike pulse."),
@@ -413,11 +581,20 @@
       modalBody: {
         name: "Modal Body", short: "Five ringing head modes", render: modalBody,
         description: "Five damped head resonances with adjustable strike position and overtone decay.",
-        controls: [tune(185), bodyDecay(155),
+        controls: [tune(185), bodyHold, bodyDecay(155),
           control("resonance", "Upper modes", 0, 100, 1, "%", 62, "Level of the four upper resonances."),
           control("damping", "Damping", 0, 100, 1, "%", 48, "How quickly the upper modes die away."),
           control("strikePosition", "Strike position", 0, 100, 1, "%", 50, "Moves the strike from the center toward the edge and changes which modes ring."),
           drive(1)],
+      },
+      twoStageBody: {
+        name: "Two-Stage Body", short: "Upper strike into low body", renderBuffer: renderTwoStageBody,
+        description: "A short upper tone hands off to a falling low body with a held front and a steeper late decay.",
+        controls: [tune(174, "Pitch of the lower body once its downward bend settles."),
+          control("strikePitch", "Strike pitch", 280, 900, 1, " Hz", 485, "Pitch of the upper body tone."),
+          control("handoff", "Handoff time", 1, 30, 0.1, " ms", 10.7, "Crossfade time from the upper tone to the lower body."),
+          control("bodyHold", "Body hold", 0, 40, 0.1, " ms", 16.7, "Time from the start of the hit before the body begins to decay."),
+          control("bodyLength", "Body length", 25, 200, 1, "%", 100, "Scales the body decay after the hold.")],
       },
       wires: {
         name: "Snare Wires", short: "Filtered noise layer", render: wireVoice,
@@ -432,48 +609,82 @@
           control("grain", "Grain", 0, 100, 1, "%", 84, "Depth of fast amplitude modulation on the wire noise."),
           drive(0)],
       },
+      resonantWires: {
+        name: "Resonant Wires", short: "Bright noise with a ringing tail", renderBuffer: renderResonantWires,
+        description: "A bright wire bloom with an independently adjustable late resonance.",
+        controls: [
+          control("wireDelay", "Wire delay", 0, 60, 0.1, " ms", 18.6, "Time before the wire tail begins."),
+          control("wireRise", "Wire rise", 1, 80, 0.1, " ms", 31.1, "Time scale of the wire fade-in. Higher values bring the wires up more gradually."),
+          control("wireLength", "Wire length", 25, 200, 1, "%", 100, "Scales the decay times of the wire noise and ring."),
+          control("brightness", "Wire brightness", 0, 200, 1, "%", 100, "Sets the level of the upper noise bands relative to the lower bands."),
+          control("ringPitch", "Tail ring pitch", 1000, 3000, 1, " Hz", 1674, "Pitch of the narrow resonance in the wire tail."),
+          control("ringLevel", "Tail ring level", 0, 100, 1, "%", 100, "Level of the narrow resonance in the wire tail."),
+          control("seed", "Noise seed", 0, 99, 1, "", 0, "Changes the repeatable noise pattern. Use zero for the reference recipe.")],
+      },
       rim: {
-        name: "Rim Shot", short: "Rim tones + noise click", render: rimShot,
-        description: "Two short rim tones and a sharp click for adding definition at the front of a hit.",
+        name: "Rim Shot", short: "Rim tones and a noise click", renderBuffer: renderRimShot,
+        description: "Shape the rim tones and the noise click separately, from a plain rim hit to a tight layered crack.",
         controls: [
           control("rimPitch", "Rim pitch", 400, 3000, 1, " Hz", 1060, "Pitch of the lower rim resonance."),
-          control("bodyDecay", "Rim decay", 8, 130, 1, " ms", 36, "Time for the rim tones to fall by 40 dB."),
-          control("clickTone", "Click brightness", 2600, 14000, 10, " Hz", 9000, "Upper cutoff of the transient noise."),
-          control("clickDecay", "Click decay", 3, 60, 1, " ms", 14, "Time for the click to fall by 40 dB."),
+          control("bodyDecay", "Rim decay", 8, 130, 1, " ms", 36, "Controls the lifetime of the rim tones."),
+          control("contour", "Rim contour", 0, 100, 1, "%", 0, "Blends an exponential ring into a shaped strike."),
+          control("rimBend", "Pitch bend", 0, 150, 1, "%", 0, "Amount of downward pitch movement in the rim tones."),
+          control("snapLevel", "Snap level", 0, 150, 1, "%", 0, "Level of the shortest, highest rim tone."),
+          control("clickTone", "Click brightness", 2600, 14000, 10, " Hz", 9000, "Shifts the noise click higher or lower."),
+          control("clickFocus", "Click focus", 0, 100, 1, "%", 0, "Higher values concentrate the click into a narrower band."),
+          control("clickDecay", "Click decay", 3, 60, 0.1, " ms", 14, "Time for the click to fall by about 40 dB."),
+          control("clickLevel", "Click level", 0, 150, 1, "%", 100, "Level of the transient noise relative to the rim tones."),
           drive(2),
         ],
       },
     };
 
     function renderVoice(engine, patch, layerId) {
+      if (engine.renderBuffer) return engine.renderBuffer(patch, layerId);
       const clickDecay = patch.click === 0 ? 0 : patch.clickDecay ?? 0;
-      const longestDecay = Math.max(patch.bodyDecay ?? 0, patch.wireDecay ?? 0, clickDecay);
-      const duration = (longestDecay * 1.5 + (patch.wireDelay ?? 0) + 5) / 1000;
+      const bodyLength = (patch.bodyHold ?? 0) + (patch.bodyDecay ?? 0) * 1.5;
+      const wireLength = (patch.wireDelay ?? 0) + (patch.wireDecay ?? 0) * 1.5;
+      const duration = (Math.max(bodyLength, wireLength, clickDecay * 1.5) + 5) / 1000;
       const samples = new Float32Array(Math.ceil(rate * duration));
       const voice = engine.render(patch, whiteNoise(layerId));
       const boost = gain(patch.drive);
       for (let i = 0; i < samples.length; i++) {
         const time = i / rate;
         const raw = voice(time);
-        const shaped = patch.drive > 0
-          ? raw + (Math.tanh(raw * boost) - raw) * Math.min(1, patch.drive / 5)
-          : raw;
+        const shaped = softDrive(raw, patch.drive, boost);
         const fade = Math.min(1, (samples.length - 1 - i) / 240);
         samples[i] = shaped * fade;
       }
       return { samples };
     }
 
+    function softDrive(sample, driveDb, boost) {
+      return driveDb > 0
+        ? sample + (Math.tanh(sample * boost) - sample) * Math.min(1, driveDb / 5)
+        : sample;
+    }
+
     function mixLayers(layers, masterGainDb) {
       const length = layers.reduce((longest, layer) => Math.max(longest, layer.voice.samples.length), 1);
-      const samples = new Float32Array(length);
+      const hasPunch = layers.some(({ voice }) => voice.punch);
+      const samples = hasPunch ? new Float64Array(length) : new Float32Array(length);
+      const punch = hasPunch ? new Float64Array(length) : null;
       for (const { voice, level } of layers) {
         const weight = level / 100;
-        for (let i = 0; i < voice.samples.length; i++) samples[i] += voice.samples[i] * weight;
+        const punchAmount = voice.punch ?? 0;
+        if (punchAmount < 1) {
+          const cleanWeight = weight * (1 - punchAmount);
+          for (let i = 0; i < voice.samples.length; i++) samples[i] += voice.samples[i] * cleanWeight;
+        }
+        if (punchAmount > 0) {
+          const punchWeight = weight * punchAmount;
+          for (let i = 0; i < voice.samples.length; i++) punch[i] += voice.samples[i] * punchWeight;
+        }
       }
       const master = gain(masterGainDb);
       let peak = 0;
       for (let i = 0; i < length; i++) {
+        if (punch) samples[i] += shapePunch(punch[i], i / (rate / 1000));
         samples[i] *= master;
         peak = Math.max(peak, Math.abs(samples[i]));
       }
@@ -481,10 +692,11 @@
       if (trim < 1) {
         for (let i = 0; i < length; i++) samples[i] *= trim;
       }
-      return { samples, peak: peak * trim, trim };
+      return { samples, peak: peak * trim, trim, keepTail: layers.some(({ voice }) => voice.keepTail) };
     }
 
-    function trimWaveTail({ samples, peak }) {
+    function trimWaveTail({ samples, peak, keepTail }) {
+      if (keepTail) return samples;
       // Keep quieter mixes proportionally longer, down to the PCM rounding floor.
       const threshold = Math.max(0.5 / 32768, Math.min(gain(-60), peak * gain(-50)));
       let last = samples.length - 1;
@@ -508,7 +720,8 @@
     }
 
     function waveFile(samples) {
-      const data = new DataView(new ArrayBuffer(44 + samples.length * 2));
+      const pcmBytes = samples.length * 2;
+      const data = new DataView(new ArrayBuffer(44 + pcmBytes));
       function tag(offset, name) {
         for (let i = 0; i < name.length; i++) data.setUint8(offset + i, name.charCodeAt(i));
       }
@@ -524,7 +737,7 @@
       data.setUint16(32, 2, true);
       data.setUint16(34, 16, true);
       tag(36, "data");
-      data.setUint32(40, samples.length * 2, true);
+      data.setUint32(40, pcmBytes, true);
       samples.forEach((sample, i) => {
         data.setInt16(44 + i * 2, Math.round(sample * (sample < 0 ? 32768 : 32767)), true);
       });
@@ -536,7 +749,7 @@
     const defaultMasterGainDb = -7;
     const validGain = value => Number.isFinite(value) && value >= -30 && value <= 0;
     const storageKey = "snare-lab-cards-v1";
-    const storageVersion = 2;
+    const storageVersion = 3;
     const maxLayerLevel = 100;
     const createLayer = (id, model) => ({
       id, model, level: maxLayerLevel, muted: false, solo: false, settings: defaults(engines[model]),
@@ -552,7 +765,7 @@
       if (validGain(saved?.masterGainDb)) masterGainDb = saved.masterGainDb;
       if (Number.isInteger(saved?.tempo) && saved.tempo >= 40 && saved.tempo <= 220) tempo = saved.tempo;
       if (Array.isArray(saved?.layers)) {
-        const rescaleGrain = (saved.version ?? 1) < 2;
+        const savedVersion = saved.version ?? 1;
         const ids = new Set();
         layers = [];
         for (const item of saved.layers) {
@@ -569,8 +782,13 @@
               (!spec.options || Number.isInteger(value))) layer.settings[spec.key] = value;
           }
           const savedGrain = item.settings?.grain;
-          if (rescaleGrain && model === "sweepWires" && Number.isFinite(savedGrain) && savedGrain >= 0 && savedGrain <= 100) {
+          if (savedVersion < 2 && model === "sweepWires" && Number.isFinite(savedGrain) && savedGrain >= 0 && savedGrain <= 100) {
             layer.settings.grain = Math.min(100, savedGrain * 2);
+          }
+          const savedRingLevel = item.settings?.ringLevel;
+          if (savedVersion < 3 && model === "resonantWires" &&
+            Number.isFinite(savedRingLevel) && savedRingLevel >= 0 && savedRingLevel <= 200) {
+            layer.settings.ringLevel = Math.min(100, savedRingLevel * 4);
           }
           ids.add(layer.id);
           layers.push(layer);
@@ -585,7 +803,9 @@
 
     function save() {
       try {
-        localStorage.setItem(storageKey, JSON.stringify({ version: storageVersion, layers, selectedId, nextLayerId, tempo, masterGainDb }));
+        localStorage.setItem(storageKey, JSON.stringify({
+          version: storageVersion, layers, selectedId, nextLayerId, tempo, masterGainDb,
+        }));
       } catch {
         $("storage-note").textContent = "Your layers are saved for this session.";
       }
@@ -835,7 +1055,7 @@
     function generateRandomLayers() {
       const model = bodyVoices[Math.floor(Math.random() * bodyVoices.length)];
       const body = createLayer(nextLayerId++, model);
-      const wireModel = Math.random() < 0.5 ? "wires" : "sweepWires";
+      const wireModel = wireVoices[Math.floor(Math.random() * wireVoices.length)];
       const wires = createLayer(nextLayerId++, wireModel);
       wires.level = 55 + Math.floor(Math.random() * 31);
       layers = [body, wires];
@@ -1019,7 +1239,7 @@
       const mix = currentMix();
       if (bufferedMix !== mix) {
         audioBuffer = audio.createBuffer(1, mix.samples.length, rate);
-        audioBuffer.copyToChannel(mix.samples, 0);
+        audioBuffer.getChannelData(0).set(mix.samples);
         bufferedMix = mix;
       }
       const source = audio.createBufferSource();
